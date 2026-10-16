@@ -13,6 +13,9 @@ API facts verified against live Fusion (Oct 2026):
 Set MESH_NAME (None = first mesh body found) and OUT_PATH (on the Fusion machine;
 on Windows+WSL, C:\\Users\\Public\\ is reachable from WSL as /mnt/c/Users/Public/).
 Prints JSON including the extents in mm - check them against inspect_design's bbox.
+COORDS="local" (default) exports in the mesh component's own frame and reports the
+occurrence transform separately. If that transform is rotated, build the new component in
+this local frame on origin planes, then give its occurrence the same transform.
 Entry point run(context); REPL-style servers: uncomment run(None) at the bottom.
 """
 import json, math, os, struct, tempfile
@@ -20,7 +23,33 @@ import adsk.core, adsk.fusion
 
 MESH_NAME = None
 OUT_PATH = os.path.join(tempfile.gettempdir(), "fusion_mesh_ref.stl")
+# "local": the mesh component's own frame (default - this is the frame to analyse and
+#          build in; it matches inspect_design's bbox and is usually the original CAD frame)
+# "world": after the occurrence transform (what you see in the viewport)
+COORDS = "local"
 CM2MM = 10.0
+
+
+def describe_transform(m):
+    """Translation (mm), axis vectors and a 'rotated' flag for an occurrence Matrix3D."""
+    t = m.translation
+    out = {"translation_mm": [round(t.x * CM2MM, 4), round(t.y * CM2MM, 4), round(t.z * CM2MM, 4)]}
+    try:
+        res = m.getAsCoordinateSystem()          # (origin, xAxis, yAxis, zAxis)
+        axes = res[-3:]
+        out["x_axis"], out["y_axis"], out["z_axis"] = [
+            [round(v.x, 6), round(v.y, 6), round(v.z, 6)] for v in axes]
+        ident = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        out["rotated"] = any(abs(a - b) > 1e-6 for got, want in
+                             zip((out["x_axis"], out["y_axis"], out["z_axis"]), ident)
+                             for a, b in zip(got, want))
+    except Exception as e:                        # report, don't fail the export
+        out["axes_error"] = str(e)
+    try:
+        out["matrix_row_major"] = [round(v, 6) for v in m.asArray()]
+    except Exception:
+        pass
+    return out
 
 
 def main():
@@ -48,7 +77,7 @@ def main():
 
     mesh = target.mesh
     pts = list(mesh.nodeCoordinates)              # Point3D, cm (local to the component)
-    if xf is not None:
+    if xf is not None and COORDS == "world":
         for p in pts:
             p.transformBy(xf)                     # in place; returns bool
     P = [(p.x * CM2MM, p.y * CM2MM, p.z * CM2MM) for p in pts]
@@ -78,7 +107,9 @@ def main():
 
     print(json.dumps({
         "path": OUT_PATH, "mesh_body": target.name, "triangles": len(tris), "units": "mm",
-        "world_transform_applied": xf is not None,
+        "coords": COORDS,
+        "world_transform_applied": xf is not None and COORDS == "world",
+        "occurrence_transform": describe_transform(xf) if xf is not None else None,
         "extents_mm": [round(hi[k] - lo[k], 3) for k in range(3)],
         "bbox_min_mm": [round(v, 3) for v in lo],
         "untriangulated_polygons_skipped": skipped_polys,

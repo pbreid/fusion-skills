@@ -155,7 +155,12 @@ bf = comp.features.baseFeatures.add(); bf.startEdit(); comp.meshBodies.add(path,
 - `TriangleMesh` (from `body.meshManager.createMeshCalculator().calculate()` on a B-rep
   body) is different: it does have `nodeIndices`.
 - Coordinates are in the owning component's space. For a mesh inside a sub-component,
-  apply the occurrence's `transform2`.
+  apply the occurrence's `transform2` to get world coordinates. `body.boundingBox` is
+  also component-local, so world extents differ from it when the occurrence is rotated.
+  Read rotation with `transform2.getAsCoordinateSystem()` (origin, x, y, z axes) and
+  translation with `transform2.translation`. To place a new component like an existing one:
+  `newOcc.transform2 = refOcc.transform2` (then Capture Position, or use an as-built joint, if
+  it must persist).
 - `Point3D.transformBy(matrix)` changes the point **in place** and returns a bool, so
   `[p.transformBy(m) for p in pts]` gives a list of bools. `Matrix3D` has no `asMatrix`,
   `transformPoint` or `getItem`. Use `getCell(row, col)` / `asArray()` if you need values.

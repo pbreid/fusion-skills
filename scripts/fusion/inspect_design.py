@@ -37,7 +37,7 @@ def main():
         "components": [], "occurrences": [], "timeline_problems": [], "mesh_bodies": [],
     }
     for comp in design.allComponents:
-        c = {"name": comp.name, "bodies": [], "sketches": []}
+        c = {"name": comp.name, "bodies": [], "sketches": []}  # bbox values are in this component's LOCAL frame
         for b in comp.bRepBodies:
             c["bodies"].append({
                 "name": b.name, "solid": b.isSolid, "visible": b.isVisible,
@@ -53,11 +53,21 @@ def main():
                                        "bbox_mm": bbox_mm(m.boundingBox)})
         out["components"].append(c)
     for occ in design.rootComponent.allOccurrences:
-        t = occ.transform2.translation
+        xf = occ.transform2
+        t = xf.translation
+        rot = None
+        try:
+            axes = xf.getAsCoordinateSystem()[-3:]
+            vecs = [[round(v.x, 5), round(v.y, 5), round(v.z, 5)] for v in axes]
+            rotated = any(abs(vecs[i][j] - (1 if i == j else 0)) > 1e-6 for i in range(3) for j in range(3))
+            rot = {"rotated": rotated, "x_axis": vecs[0], "y_axis": vecs[1], "z_axis": vecs[2]}
+        except Exception as e:
+            rot = {"error": str(e)}
         out["occurrences"].append({"path": occ.fullPathName, "component": occ.component.name,
                                    "grounded": occ.isGrounded,
                                    "is_referenced": occ.isReferencedComponent,
-                                   "offset_mm": [round(v * CM2MM, 3) for v in (t.x, t.y, t.z)]})
+                                   "offset_mm": [round(v * CM2MM, 3) for v in (t.x, t.y, t.z)],
+                                   "rotation": rot})
     if out["design_type"] == "parametric":
         tl = design.timeline
         out["timeline_count"] = tl.count

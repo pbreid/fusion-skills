@@ -41,7 +41,7 @@ fusion360/
         ├── inspect_design.py        Read-only JSON snapshot of the active design
         ├── build_template.py        Reference build pattern (parameters, constrained sketches, patterns, fillets, report)
         ├── export_bodies_stl.py     Tessellates solid bodies to a millimetre STL in world coordinates
-        └── export_mesh_body_stl.py  Writes an imported mesh body to a millimetre STL in world coordinates
+        └── export_mesh_body_stl.py  Writes an imported mesh body to a millimetre STL (local frame by default, or world)
 ```
 
 ### How the skill is structured
@@ -186,7 +186,7 @@ raises with Fusion's traceback on failure, and decodes screenshots to PNG. Set
 | `inspect_design.py` | No | Prints JSON: document state, units, parameters, components, bodies (bbox in mm), sketches and their constraint status, mesh bodies, occurrences, timeline errors and warnings. |
 | `build_template.py` | **Yes** | A worked example: a 60×40×6 plate with a 2×2 hole pattern and filleted corners. It shows the conventions, and its helpers are meant to be copied: idempotent `param()`, `new_component()`, `centered_rectangle()`, `extrude()`, `cut_through_all()`, `fillet()`, `report()`. Run it in a new or scratch design. |
 | `export_bodies_stl.py` | No (it writes a file) | Writes the selected solid bodies as a binary STL in **mm**, in world coordinates. It can also print the STL as base64 when the agent can't see Fusion's filesystem. |
-| `export_mesh_body_stl.py` | No (it writes a file) | Writes an imported **mesh** body (the STL you want to rebuild) as a binary STL in **mm**, in world coordinates, and prints its extents. Fusion's mesh API returns cm; this script converts. |
+| `export_mesh_body_stl.py` | No (it writes a file) | Writes an imported **mesh** body (the STL you want to rebuild) as a binary STL in **mm**, and prints its extents and the occurrence transform. `COORDS="local"` (default) uses the mesh component's own frame for analysis and building; `COORDS="world"` is for comparing against `export_bodies_stl.py` output. Fusion's mesh API returns cm; this script converts. |
 
 All three expose `run(context)`, which is the convention the official MCP uses. For REPL-style
 servers such as faust-machines `execute_code`, uncomment the `run(None)` line at the bottom.
@@ -200,7 +200,7 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
 | `mesh_analyze.py`, `mesh_compare.py` | Tested on synthetic parts: a prismatic bracket with a boss, bore and hole pattern, an X-axis turned spacer, and a rotated block. All features were recovered at the correct world coordinates, and a deliberate 0.2 mm bore error was detected and localised. The scale check catches a cm-valued file. |
 | `fusion_mcp.py` | Tested against a mock server that reproduces the live protocol (session header, SSE responses, result envelope, screenshot payload). |
 | `inspect_design.py` | **Run against live Fusion** (first real test, Oct 2026): worked first time. |
-| `export_mesh_body_stl.py` | Written from the PolygonMesh members observed in that live session, which fixes the cm→mm bug found there. Not yet run as a file. |
+| `export_mesh_body_stl.py` | **Run against live Fusion** (second test): correct mm output first time. That run exposed the rotated-occurrence case, which is now handled. |
 | `build_template.py`, `export_bodies_stl.py` | Syntax-checked and written against the documented API, **not yet run live**. Expect small fixes (deprecated names, hole/extrude direction). |
 | Official MCP tools | Verified live: `fusion_mcp_read`, `fusion_mcp_execute`, `fusion_mcp_update` and `fusion_mcp_electronics_read` on server "MCP Server Adapter" 1.0.0. Names may change between Fusion builds, so the skill still tells the agent to check `tools/list`. |
 
@@ -212,6 +212,10 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
   - Documented the real tool schemas, the result envelope and the WSL setup.
   - Made the intake questions a hard stop before planning.
   - Added venv setup.
+- **Second live test fixes.**
+  - The mesh exporter now defaults to the mesh component's **local frame** and reports the occurrence transform, including a `rotated` flag.
+  - `inspect_design.py` now reports occurrence rotation as well as offset.
+  - The mesh workflow tells the agent to build in the local frame and match the occurrence placement, instead of sketching on a tilted world frame.
 
 Please open an issue or PR with fixes from live runs.
 
