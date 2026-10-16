@@ -72,7 +72,14 @@ def main():
             if target:
                 break
     if target is None:
-        print(json.dumps({"error": "no mesh body found", "wanted": MESH_NAME}))
+        breps = [b.name for c in design.allComponents for b in c.bRepBodies]
+        print(json.dumps({
+            "error": "no mesh body found", "wanted": MESH_NAME,
+            "brep_bodies_present": breps[:20],
+            "hint": ("The mesh may have been converted (Mesh > Convert Mesh), which consumes the "
+                     "mesh body. Either undo/delete the Convert Mesh feature to restore it, or "
+                     "export the converted solid with export_bodies_stl.py "
+                     "--set BODY_NAMES='[\"<name>\"]' and analyse that STL instead.")}))
         return
 
     mesh = target.mesh

@@ -24,6 +24,14 @@ Watertight -> solid; otherwise surfaces. Complex filleted meshes often fail pris
 Converted bodies have **no sketches or parameters** - the dimensions are frozen. That is why
 route A is the default when the user says "parametric".
 
+**Don't convert the mesh first.** Faceted Convert Mesh (one B-rep face per triangle) adds no
+information, makes the design heavy, and consumes the mesh body the export script reads. Generate
+Face Groups only prepares a Prismatic conversion. Prismatic conversion (paid licences) gives
+exact planes and cylinders to *measure*, but still no sketches, parameters or history, so at
+most it's a reference. Route A works directly on the mesh triangles. If the user has already
+converted: ask them to undo the Convert Mesh feature, or export the converted body with
+`export_bodies_stl.py --set BODY_NAMES='["<name>"]'` and analyse that STL (same geometry).
+
 ## 1. Intake (always)
 1. **Get the mesh onto the agent side** - analysis runs in the agent's Python, not in Fusion.
    - If the user has the original STL file, use it directly (then skip to step 2).
