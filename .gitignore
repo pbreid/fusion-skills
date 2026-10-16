@@ -1,3 +1,5 @@
-# Windows NTFS metadata (WSL writes "name:Zone.Identifier", PowerShell "name:Zone.Identifier:*")
-*:Zone.Identifier
-*:Zone.Identifier:$DATA
+.venv/
+__pycache__/
+*.stl
+*_report*.json
+shot_*.png

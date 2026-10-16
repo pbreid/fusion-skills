@@ -60,7 +60,15 @@ route A is the default when the user says "parametric".
    Include a screenshot and the headline analysis numbers so the user can answer quickly.
    Continue only after they reply. If they're unreachable (unattended run), state the
    defaults you assumed at the top of your report.
-5. Read the report: extents/units warning, watertight/bodies, through-hole count (genus), whether it is
+5. Read the report (its JSON schema is in the docstring at the top of `mesh_analyze.py`; read that rather than guessing key names). Start with:
+   - `body_breakdown`. "Not watertight" plus a few tiny fragments with negligible area
+     percentage is tessellation debris: say so, don't treat it as several parts.
+   - `cylinder_groups`. Holes are already grouped into patterns (count, Ø, axis, the walls
+     they sit on, grid pitch, regular or not). These map straight onto one hole and a
+     rectangular feature pattern. Irregular groups are separate features.
+   - For more detail at specific heights, re-run with `--section-at z=60,z=65,x=-68`
+     instead of writing your own trimesh slicing (its API changes between versions).
+   Then: extents/units warning, watertight/bodies, through-hole count (genus), whether it is
    axis-aligned, dominant planes, cylinders (holes/bosses/fillets with diameters and axes),
    section loops at each level, Z-levels (candidate extrude extents), symmetry.
 6. If not axis-aligned (check this only *after* the scale gate passes): align it (rotate so principal faces lie on origin planes, translate

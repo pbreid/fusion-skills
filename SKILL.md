@@ -25,9 +25,11 @@ that looks right.
 3. Run `scripts/fusion/inspect_design.py` (read-only) to snapshot: document, saved state,
    units, design type, parameters, components, bodies, meshes, timeline errors.
    Never start editing a document you have not inspected.
-4. Agent-side Python: create a venv once (`python3 -m venv .venv && .venv/bin/pip install
-   trimesh numpy scipy shapely rtree networkx`). System pip is often blocked (PEP 668), and
-   `python` may not exist, so use `python3` or `.venv/bin/python`.
+4. Agent-side Python: create a venv once **in the working folder, not inside the skill
+   folder** (`python3 -m venv .venv && .venv/bin/pip install trimesh numpy scipy shapely rtree
+   networkx`). System pip is often blocked (PEP 668), and `python` may not exist, so use
+   `python3` or `.venv/bin/python`. Keep exports, reports and screenshots in the working
+   folder too.
 
 ## 1. Route the request
 
@@ -69,8 +71,13 @@ sources these rules came from, for when you need to look something up.
   Pass parameter expressions as strings with units (`"6 mm"`, `"plate_w/2"`) via
   `ValueInput.createByString`; raw floats are cm. Every file you export for analysis must be
   in mm. Cross-check its extents against the `inspect_design` bbox before using it.
-- **Use the skill's scripts before writing your own.** If an API call fails with an
-  AttributeError, probe `dir(obj)` once rather than guessing repeatedly.
+- **Use the skill's scripts before writing your own.** Need a slice at a specific height?
+  Use `mesh_analyze.py --section-at z=60,x=-68`. Need hole patterns? Read
+  `cylinder_groups`. Need report keys? Read the schema in the script's docstring. Need
+  tool arguments? Run `fusion_mcp.py tools --json` or `directions`. If an API call fails with
+  an AttributeError, probe `dir(obj)` once rather than guessing repeatedly.
+- **Only report what you measured.** Say "not verified" rather than asserting something you
+  haven't checked (for example "the shell is closed in Fusion").
 - **Safety:** save (or confirm the document is disposable) before any write script. Use the
   read-only flag for inspection. Never delete user geometry, break links, or switch to direct
   modelling without asking. If a write times out, inspect before retrying - it may have applied.
@@ -91,10 +98,13 @@ anything left for them to decide.
 ## 4. Scripts in this skill
 
 - `scripts/fusion_mcp.py` - stdlib client for the official Fusion MCP over HTTP (handshake,
-  session header, envelope parsing, `run`, `screenshot`, `docs`). Use it as a CLI or import it.
+  session header, envelope parsing, `run`, `screenshot`, `directions`, `tools --json`, `docs`).
+  Use it as a CLI or import it.
 - `scripts/mesh_analyze.py` - offline (agent-side Python) mesh analysis: bbox, units sanity,
   planes, holes/bosses/fillets with axes and diameters, world-aligned cross-sections, symmetry.
-  `--expect-extents X,Y,Z` aborts on a scale mismatch; `--scale` rescales.
+  `--expect-extents X,Y,Z` aborts on a scale mismatch; `--scale` rescales; `--section-at z=60,x=-68`
+  slices at exact positions. Also reports `cylinder_groups` (hole patterns with count and grid
+  pitch) and `body_breakdown` (real bodies vs tessellation fragments).
 - `scripts/mesh_compare.py` - two-way deviation between source mesh and rebuilt STL, PASS/FAIL
   against a tolerance, and where the worst regions are.
 - `scripts/fusion/inspect_design.py` - read-only JSON snapshot of the active design.

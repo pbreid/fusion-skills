@@ -14,7 +14,8 @@ Protocol as observed against live Fusion (server "MCP Server Adapter" 1.0.0, Oct
     {"message": <script stdout>, "success": true} or {"error": <traceback>, "success": false}
 
 CLI:
-  fusion_mcp.py tools                       list tools (+ --schema for input schemas)
+  fusion_mcp.py tools [--schema] [--json]   list tools (--json = machine-readable)
+  fusion_mcp.py directions                  valid screenshot directions
   fusion_mcp.py read '{"queryType":"..."}'  raw read call
   fusion_mcp.py run script.py [--write]     execute a Fusion script (read-only unless --write)
   fusion_mcp.py screenshot [--direction iso-top-right] [--out shot.png] [--width 1200 --height 900]
@@ -97,30 +98,62 @@ class FusionMCP:
         env, content = self.call("fusion_mcp_read", args)
         return env, content
 
+    def enum_values(self, tool, prop):
+        """Allowed values for a property anywhere in a tool's input schema (from tools/list)."""
+        found = set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k == prop and isinstance(v, dict) and "enum" in v:
+                        found.update(v["enum"])
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+        for t in self.tools():
+            if t["name"] == tool:
+                walk(t.get("inputSchema", {}))
+        return sorted(found)
+
     def screenshot(self, out, direction="iso-top-right", width=1200, height=900):
+        """Valid directions on the tested build include iso-top-right, front, top, right
+        (plain "iso" is rejected). On a validation error the allowed list is fetched and shown."""
         _, content = self.read(queryType="screenshot", direction=direction, width=width, height=height)
         for c in content:
             if c.get("data"):
+                os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
                 with open(out, "wb") as f:
                     f.write(base64.b64decode(c["data"]))
                 return out
-        raise RuntimeError(f"no image in screenshot result: {str(content)[:300]}")
+        text = " ".join(c.get("text", "") for c in content)
+        if "direction" in text and "enum" in text:
+            allowed = self.enum_values("fusion_mcp_read", "direction")
+            raise RuntimeError(f"invalid direction '{direction}'. Allowed: {', '.join(allowed) or '(see tools --schema)'}")
+        raise RuntimeError(f"no image in screenshot result: {text[:300]}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("tools"); t.add_argument("--schema", action="store_true")
+    t.add_argument("--json", action="store_true", help="machine-readable tools/list output")
     r = sub.add_parser("read"); r.add_argument("args")
     x = sub.add_parser("run"); x.add_argument("script"); x.add_argument("--write", action="store_true")
-    s = sub.add_parser("screenshot"); s.add_argument("--direction", default="iso-top-right")
+    s = sub.add_parser("screenshot"); s.add_argument("--direction", default="iso-top-right",
+        help="e.g. iso-top-right, front, top, right (run 'directions' for the full list)")
     s.add_argument("--out", default="fusion_shot.png"); s.add_argument("--width", type=int, default=1200)
     s.add_argument("--height", type=int, default=900)
+    sub.add_parser("directions", help="list valid screenshot directions")
     d = sub.add_parser("docs"); d.add_argument("pattern"); d.add_argument("--extra", default="{}",
                                                                          help="extra JSON args")
     a = ap.parse_args()
     f = FusionMCP()
-    if a.cmd == "tools":
+    if a.cmd == "tools" and a.json:
+        print(json.dumps(f.tools(), indent=1))
+    elif a.cmd == "directions":
+        print("\n".join(f.enum_values("fusion_mcp_read", "direction")))
+    elif a.cmd == "tools":
         for tool in f.tools():
             print(f"== {tool['name']}\n{tool.get('description', '')[:400]}")
             if a.schema:

@@ -27,7 +27,7 @@ builds, so list them at connect time. On the build tested, they were:
 
 | Tool | Arguments | Use |
 |---|---|---|
-| `fusion_mcp_read` | `queryType` (required) + query-specific args | Design queries; `queryType: "screenshot"` with `direction` (e.g. `iso-top-right`, `top`, `front`), `width`, `height` returns a base64 PNG; `queryType: "apiDocumentation"` with `searchPattern` (plus optional `apiCategory`, `filter`) searches the API docs |
+| `fusion_mcp_read` | `queryType` (required) + query-specific args | Design queries; `queryType: "screenshot"` with `direction` (confirmed values: `iso-top-right`, `front`, `top`, `right`; plain `iso` is rejected; `fusion_mcp.py directions` lists all), `width`, `height` returns a base64 PNG; `queryType: "apiDocumentation"` with `searchPattern` (plus optional `apiCategory`, `filter`) searches the API docs |
 | `fusion_mcp_execute` | `featureType: "script"`, `object: {script: "<python source>", readOnly: true\|false}` | Run a Fusion Python script. The key is **`script`**, not `code` |
 | `fusion_mcp_update` | `featureType: "undo" \| "redo"` | Undo/redo |
 | `fusion_mcp_electronics_read` | | Electronics documents only |

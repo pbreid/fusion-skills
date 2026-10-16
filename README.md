@@ -67,10 +67,13 @@ enters context when it's needed (progressive disclosure). The scripts do determi
 - Python 3.10+ for the mesh scripts. Use a virtual environment: Debian/Ubuntu and WSL block
   system-wide `pip install` (PEP 668), and `python` may not exist (use `python3`):
   ```bash
-  cd fusion360
+  cd ~/remodel          # your working folder, not the skill folder
   python3 -m venv .venv
   .venv/bin/pip install trimesh numpy scipy shapely rtree networkx
   ```
+  Then run scripts by full path, for example
+  `.venv/bin/python ~/.agents/skills/fusion360/scripts/mesh_analyze.py part.stl ...`.
+  Keeping the venv out of the skill folder keeps the skill small and the repo clean.
   Fusion's embedded Python doesn't include numpy or trimesh. That's why mesh analysis runs
   on the agent side. `fusion_mcp.py` needs only the standard library.
 
@@ -151,6 +154,11 @@ numbers, assumptions, and open items.
     --expect-extents 156,204,142.5 --json part_report.json
 # options: --axis auto|x|y|z   --tol 0.05   --scale 10 (cm → mm)
 ```
+`--section-at z=60,x=-68` adds sections at exact positions. The report also includes
+`cylinder_groups`, which turns hundreds of hole records into lines like "Ø5 hole ×560, X
+axis, grid Y:20@7.4 Z:14@6.7", and `body_breakdown`, which separates real bodies from
+tessellation slivers.
+
 `--expect-extents` takes the bbox from `inspect_design.py`. If the file is scaled wrong (for
 example a cm-valued export), the script stops with `SCALE MISMATCH` and suggests the fix,
 instead of producing a report that's 10× off.
@@ -175,7 +183,9 @@ flags cm/mm mismatches, and lists the centroids of the worst regions so you know
 to fix. The exit code is `0` for PASS and `1` for FAIL.
 
 ### `scripts/fusion_mcp.py` (runs on the agent side)
-A standard-library client for the official endpoint. It does the `initialize` handshake,
+A standard-library client for the official endpoint. Commands: `tools [--schema] [--json]`,
+`run script.py [--write]`, `screenshot --direction ...`, `directions`, `read '<json>'`,
+`docs "<pattern>"`. It does the `initialize` handshake,
 keeps the `Mcp-Session-Id` header, parses the `{"message", "success"}` result envelope,
 raises with Fusion's traceback on failure, and decodes screenshots to PNG. Set
 `FUSION_MCP_URL` to override the default `http://127.0.0.1:27182/mcp`.
@@ -212,6 +222,15 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
   - Documented the real tool schemas, the result envelope and the WSL setup.
   - Made the intake questions a hard stop before planning.
   - Added venv setup.
+- **Third live test fixes.**
+  - Hole detection now works on coarsely tessellated holes. They were being labelled as fillets.
+  - New `cylinder_groups` output reports hole patterns with count and grid pitch.
+  - New `body_breakdown` output separates real bodies from tessellation fragments.
+  - Symmetry results are now repeatable between runs.
+  - New `--section-at` option slices at exact positions.
+  - `fusion_mcp.py` gained `tools --json` and `directions`, and lists the valid screenshot directions when a value is rejected.
+  - Venv and working files now go in the working folder, not the skill folder.
+  - New rule: only report what was measured.
 - **Second live test fixes.**
   - The mesh exporter now defaults to the mesh component's **local frame** and reports the occurrence transform, including a `rotated` flag.
   - `inspect_design.py` now reports occurrence rotation as well as offset.
