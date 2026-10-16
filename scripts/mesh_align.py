@@ -14,6 +14,11 @@ sensible origin and writes an aligned STL plus the transform.
           center: bbox centre at origin (best for parts symmetric in all 3 axes)
           min: bbox min corner at origin.  keep: rotate about the bbox centre only
 --then-rotate  extra 90-degree turns after squaring, if the user wants a different up/front
+--up DIR       after squaring, turn the part so the side currently facing DIR (+x,-x,+y,-y,+z,-z
+               in the squared frame) faces +Z. Use when the user says e.g. "the feet are on the
+               +Y face" -> --up=-y (use "=" for negative sides).  --front=DIR then sets which side faces -Y (front view).
+               ALWAYS rerun mesh_align with these (never hand-roll a transform): align.json must
+               stay the single source of truth that square_occurrence.py applies in Fusion.
 
 Use the WORLD-frame export (export_mesh_body_stl.py COORDS="world") as input when the mesh's
 placement in Fusion is what the user sees. The JSON "transform_mm" (4x4, row-major,
@@ -121,11 +126,33 @@ def parse_turns(spec):
     return R
 
 
+def _dir(spec):
+    spec = spec.strip().lower()
+    sign = -1.0 if spec.startswith("-") else 1.0
+    v = np.zeros(3); v["xyz".index(spec.lstrip("+-"))] = sign
+    return v
+
+
+def up_front_rotation(up, front):
+    """Proper rotation (det +1) taking the `up` direction to +Z and `front` to -Y."""
+    u = _dir(up) if up else np.array([0, 0, 1.0])
+    if front:
+        f = _dir(front)
+    else:   # keep the current front if it is still horizontal, else pick one
+        f = np.array([0, -1.0, 0]) if abs(u[1]) < 0.5 else np.array([0, 0, -1.0])
+    if abs(u @ f) > 0.5:
+        raise SystemExit("--up and --front must be different, perpendicular sides")
+    src = np.array([np.cross(-f, u), -f, u])        # rows: what becomes X, Y, Z
+    return src                                       # src @ s_i = e_i
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("mesh"); ap.add_argument("out")
     ap.add_argument("--origin", default="center-base", choices=["center-base", "center", "min", "keep"])
     ap.add_argument("--then-rotate", default="")
+    ap.add_argument("--up", help="side (+x..-z, squared frame) that should face +Z; write --up=-y for negatives")
+    ap.add_argument("--front", help="side (squared frame) that should face -Y")
     ap.add_argument("--json")
     a = ap.parse_args()
 
@@ -143,6 +170,8 @@ def main():
     else:
         ax_vec, ax_name = np.array([0.0, 0.0, 1.0]), "none"
     R = parse_turns(a.then_rotate) @ R
+    if a.up or a.front:
+        R = up_front_rotation(a.up, a.front) @ R
 
     c0 = mesh.bounds.mean(0)
     M = np.eye(4); M[:3, :3] = R; M[:3, 3] = -R @ c0 + c0       # rotate about bbox centre
@@ -187,6 +216,7 @@ def main():
         "extents_after": np.round(out.extents, 3).tolist(),
         "bbox_after": [np.round(out.bounds[0], 3).tolist(), np.round(out.bounds[1], 3).tolist()],
         "origin_mode": a.origin,
+        "up_front": {"up": a.up, "front": a.front, "then_rotate": a.then_rotate},
         "transform_mm": np.round(M, 9).tolist(),
         "note": "transform_mm maps input -> aligned (row-major 4x4, mm). Use with "
                 "scripts/fusion/square_occurrence.py to square the reference in Fusion.",
@@ -198,6 +228,9 @@ def main():
     print(f"extents before {rep['extents_before']} -> after {rep['extents_after']}")
     print(f"bbox after {rep['bbox_after']}  (origin mode {a.origin})")
     print(f"residual tilt of square-intended faces after alignment: {rep['residual_after_deg']} deg")
+    if not (a.up or a.front or a.then_rotate):
+        print("orientation: up/front kept from the current placement - CONFIRM with the user which "
+              "side is the bottom (feet, base, mounting face) and rerun with --up/--front if needed")
     if angled:
         print(f"   ({len(angled)} deliberately angled face groups ignored, e.g. braces/chamfers: "
               f"{', '.join(str(a_['deg_from_nearest_axis']) + ' deg' for a_ in angled[:4])})")

@@ -81,7 +81,12 @@ converted: ask them to undo the Convert Mesh feature, or export the converted bo
      versus cosmetic
    - intended **process/material**
    - the squared orientation: show `views.png`, state the correction applied ("removed an 8.5°
-     skew about Z; 204 mm is height (Z)"), and ask if up, front and origin are right
+     skew about Z; 204 mm is height (Z)"), and ask if up, front and origin are right.
+     mesh_align keeps the placement's up, which is often NOT the real up (an STL may have
+     been exported lying on its side). Ask with evidence: "which face is the bottom? feet,
+     base or mounting face?" and mark the candidate faces. If the answer changes it, rerun
+     `mesh_align.py ... --up=<side> [--front=<side>]` and redo views + analysis; never
+     transform the mesh by hand, or align.json (used by square_occurrence.py) goes stale
    - whether to also square the **reference mesh** in Fusion (moves its placement only,
      undoable), so the viewport, screenshots and overlay line up. See step 7
    - anything odd the analysis found (rotation off-axis, multiple bodies, open mesh, no
@@ -92,6 +97,10 @@ converted: ask them to undo the Convert Mesh feature, or export the converted bo
    `mesh_views.py part_aligned.stl --out features.png --mark "0,-71,150:A Ø56 dome" --mark "-60,70,17:B Ø18.5×1.5"`.
    Refer to the labels (A, B, ...) in the questions. The user can't answer "what are the
    Ø9.5 holes for?" without seeing where they are.
+   For interior structure (rails, bays, shelves, pockets) use
+   `mesh_sections.py part_aligned.stl --cut ... --clear ...` and show `sections.png`.
+   When the user gives a value that differs from the measurement, say so and ask which one
+   drives.
    Continue only after they reply. If they're unreachable (unattended run), state the
    defaults you assumed at the top of your report.
 5. Read the report (its JSON schema is in the docstring at the top of `mesh_analyze.py`; read that rather than guessing key names). Start with:

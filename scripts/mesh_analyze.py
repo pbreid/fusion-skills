@@ -243,12 +243,12 @@ def cylinder_groups(cyls):
     groups = {}
     for c in cyls:
         kind = c["kind"].split("/")[0]
-        key = (kind, round(c["diameter"], 1), c["axis_aligned"] or tuple(np.round(c["axis"], 2)))
+        key = (kind, round(c["diameter"], 1), c["axis_aligned"] or tuple(round(float(v), 2) for v in c["axis"]))
         groups.setdefault(key, []).append(c)
     out = []
     for (kind, dia, ax), cs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         P = np.array([c["base_point"] for c in cs])
-        g = {"kind": kind, "diameter": dia, "axis": ax if isinstance(ax, str) else list(ax),
+        g = {"kind": kind, "diameter": dia, "axis": ax if isinstance(ax, str) else [float(v) for v in ax],
              "count": len(cs), "lengths": sorted({round(c["length"], 2) for c in cs})[:6]}
         if isinstance(ax, str):
             ai = "XYZ".index(ax)

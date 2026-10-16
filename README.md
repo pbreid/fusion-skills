@@ -190,6 +190,14 @@ writes `transform_mm` for `square_occurrence.py`. Tested on a DGX-shaped part wi
 90° + 10° placement (10.0° removed, 0.0° residual), on square parts (0° change), and on a
 tilted turned part (7.0° removed, no spurious spin).
 
+### `scripts/mesh_sections.py` (runs on the agent side)
+```bash
+.venv/bin/python scripts/mesh_sections.py part_aligned.stl --cut z=70 --cut y=0 --cut x=60 --clear x=0 --out sections.png [--json sections.json]
+```
+Labelled section sheet at exact world positions, plus a text table of material regions,
+openings and clear intervals along a line. For reading the inside of a part: rails,
+shelves, bay clearances, wall thicknesses.
+
 ### `scripts/mesh_views.py` (runs on the agent side)
 ```bash
 .venv/bin/python scripts/mesh_views.py part_aligned.stl --out views.png
@@ -284,6 +292,12 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
   - The mesh exporter now defaults to the mesh component's **local frame** and reports the occurrence transform, including a `rotated` flag.
   - `inspect_design.py` now reports occurrence rotation as well as offset.
   - The mesh workflow tells the agent to build in the local frame and match the occurrence placement, instead of sketching on a tilted world frame.
+
+- **Seventh live test fixes.**
+  - The squared frame kept the STL's lying-on-its-side placement; the user's answers showed the real bottom. `mesh_align.py` gained `--up=<side>` / `--front=<side>` and now prints a reminder to confirm the bottom face. The docs require rerunning it rather than hand-rolling a transform, so `align.json` stays in sync with what gets built.
+  - The agent spent many turns writing its own voxel and section scripts (one cut every plane at the origin). New `mesh_sections.py` gives a labelled section sheet and a region/clearance table.
+  - New rule: flag user-stated values that differ from measurements (1.75 vs 1.5 mm).
+  - Cylinder axes no longer print as `np.float64(...)`.
 
 Please open an issue or PR with fixes from live runs.
 

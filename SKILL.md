@@ -126,11 +126,17 @@ cp /mnt/c/Users/Public/mesh_local.stl /mnt/c/Users/Public/mesh_world.stl .
 .venv/bin/python $S/mesh_analyze.py part_aligned.stl --sections 9                        # text summary
 .venv/bin/python $S/mesh_analyze.py part_aligned.stl --sections 9 --json report.json     # full JSON file
 .venv/bin/python $S/mesh_analyze.py part_aligned.stl --section-at x=76.75,z=10           # extra slices
+# inside the part (rails, shelves, pockets, clear openings): labelled section sheet + region table
+.venv/bin/python $S/mesh_sections.py part_aligned.stl --cut z=70 --cut y=0 --cut x=60 --clear x=0 --out sections.png
 # 5. one Fusion screenshot for context (label it "not yet squared")
 python3 $S/fusion_mcp.py screenshot --direction iso-top-right --out fusion_iso.png
 # --- STOP: report and ask (including permission to square the reference) ---
 # when asking about specific features: label them in the views
 .venv/bin/python $S/mesh_views.py part_aligned.stl --out features.png --mark "x,y,z:A Ø56 dome" --mark "x,y,z:B ..."
+# if the user's answers change which side is up/front (e.g. "feet are on the bottom" and the
+# feet face +Y): RERUN mesh_align with --up/--front, then redo views and analysis. Never
+# hand-roll a transform: align.json must match the frame you analyse and build in.
+.venv/bin/python $S/mesh_align.py mesh_world.stl part_aligned.stl --up=-y --json align.json
 # 6. after approval: square the reference mesh (moves its TOP-LEVEL occurrence; refuses if
 #    that occurrence holds other geometry), verify, retake screenshots
 python3 $S/fusion_mcp.py run $S/fusion/square_occurrence.py --write \
@@ -144,6 +150,11 @@ Notes:
 - Hole patterns, gaps and hole centres are in `cylinder_groups` (`values`, `gaps`, `centres`).
   Don't slice with trimesh yourself. A `fillet` group sharing a hole group's Ø, axis and grid
   is the same holes cut through by other geometry (for example where a floor meets the wall).
+- For interior questions use `mesh_sections.py` (it reads its JSON via `--json`). Don't
+  write voxel/section/regex scripts of your own; if a skill script is missing something,
+  say so in the report rather than building a one-off.
+- When a user-stated value differs from a measurement (user "1.75 deep", mesh 1.5), say so
+  and ask which drives; never silently keep either.
 - If Fusion runs on the same machine (no WSL), set OUT_PATH to the working folder directly
   and skip the `cp`.
 
@@ -158,7 +169,10 @@ Notes:
   slices at exact positions. Also reports `cylinder_groups` (hole patterns with count and grid
   pitch) and `body_breakdown` (real bodies vs tessellation fragments).
 - `scripts/mesh_align.py` - square a mesh to the world axes with the smallest rotation (keeps up
-  and front), set the origin, write the aligned STL and `transform_mm`.
+  and front), set the origin, write the aligned STL and `transform_mm`. `--up=-y`/`--front=+x` re-orient
+  when the user says which side is the bottom/front.
+- `scripts/mesh_sections.py` - labelled section sheet at exact cuts plus a table of material
+  regions, openings and clear intervals along a line (rails, shelves, bay clearances).
 - `scripts/mesh_views.py` - square orthographic front/top/right/iso renders of an STL (needs matplotlib).
 - `scripts/mesh_compare.py` - two-way deviation between source mesh and rebuilt STL, PASS/FAIL
   against a tolerance, and where the worst regions are.
