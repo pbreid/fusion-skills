@@ -7,6 +7,10 @@ while the Fusion viewport still has the part tilted.
     .venv/bin/pip install matplotlib
     .venv/bin/python mesh_views.py aligned.stl --out views.png [--max-faces 60000]
 
+Feature markers: --mark "X,Y,Z:label" (repeatable) draws a labelled red dot in every view.
+Use it whenever you ask the user about specific features ("A = Ø56 dome") so they can see
+what you mean. Take coordinates from the analyzer report (cylinder base_point, plane positions).
+
 Convention: front = looking along +Y (sees X horizontal, Z up), top = looking down -Z,
 right = looking along -X. Axes are labelled in mm with equal aspect.
 """
@@ -30,6 +34,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("mesh"); ap.add_argument("--out", default="views.png")
     ap.add_argument("--max-faces", type=int, default=60000)
+    ap.add_argument("--mark", action="append", default=[], metavar="X,Y,Z:LABEL",
+                    help="label a feature in every view, e.g. --mark '0,-71,150:A Ø56 dome' "
+                         "(repeatable). Use when asking the user about specific features.")
     a = ap.parse_args()
     import os
     if os.path.isdir(a.out) or a.out.endswith(("/", os.sep)):
@@ -41,6 +48,10 @@ def main():
     if len(m.faces) > a.max_faces:
         idx = np.argsort(-m.area_faces)[:a.max_faces]   # keep the largest faces
         m = trimesh.Trimesh(m.vertices, m.faces[idx], process=False)
+    marks = []
+    for spec in a.mark:
+        xyz, _, label = spec.partition(":")
+        marks.append(([float(v) for v in xyz.split(",")], label.strip() or "?"))
     tris = m.vertices[m.faces]
     light = np.array([0.4, -0.6, 0.7]); light /= np.linalg.norm(light)
     shade = 0.35 + 0.65 * np.abs(m.face_normals @ light)
@@ -61,6 +72,11 @@ def main():
         depth = {"front (-Y side)": ax.yaxis, "top": ax.zaxis, "right (+X side)": ax.xaxis}.get(name)
         if depth is not None:                       # hide the axis pointing at the viewer
             depth.set_ticklabels([]); depth.label.set_visible(False)
+        for mk in marks:
+            (x, y, z), label = mk
+            ax.scatter([x], [y], [z], color="#d62728", s=40, depthshade=False, zorder=10)
+            ax.text(x, y, z, "  " + label, color="#d62728", fontsize=9, fontweight="bold", zorder=11,
+                    bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=1))
         ax.set_title(f"{name}   extents {np.round(hi - lo, 1).tolist()} mm", fontsize=9)
     fig.tight_layout()
     fig.savefig(a.out, dpi=110)

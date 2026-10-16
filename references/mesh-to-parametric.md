@@ -87,6 +87,11 @@ converted: ask them to undo the Convert Mesh feature, or export the converted bo
    - anything odd the analysis found (rotation off-axis, multiple bodies, open mesh, no
      symmetry where symmetry was expected)
    Include a screenshot and the headline analysis numbers so the user can answer quickly.
+   **When you ask about specific features, show them.** Re-render with labelled markers,
+   using coordinates from the report:
+   `mesh_views.py part_aligned.stl --out features.png --mark "0,-71,150:A Ø56 dome" --mark "-60,70,17:B Ø18.5×1.5"`.
+   Refer to the labels (A, B, ...) in the questions. The user can't answer "what are the
+   Ø9.5 holes for?" without seeing where they are.
    Continue only after they reply. If they're unreachable (unattended run), state the
    defaults you assumed at the top of your report.
 5. Read the report (its JSON schema is in the docstring at the top of `mesh_analyze.py`; read that rather than guessing key names). Start with:

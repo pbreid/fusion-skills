@@ -33,6 +33,15 @@ Feature parameters (e.g. an extrude's distance) are model parameters; set throug
 ValueInput string so they reference user parameters.
 
 ## Components / occurrences
+Verified live (Oct 2026):
+- `getAsCoordinateSystem()` returns **4** values in Python: `(origin, xAxis, yAxis, zAxis)`.
+- `isGrounded` raises on a *native* sub-component occurrence ("not available for the occurence
+  of a sub component"). Read it from `rootComponent.allOccurrences` (the in-context versions) or
+  wrap it in try/except. There is no `Occurrence.isReferenced`; use `isReferencedComponent`.
+- Setting `transform2` on a **nested** occurrence obtained in assembly context fails with
+  `3 : invalid argument value`. Move the **top-level** ancestor instead (walk `assemblyContext`
+  up to None). `square_occurrence.py` does this.
+
 ```python
 occ  = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
 comp = occ.component; comp.name = "Lid"

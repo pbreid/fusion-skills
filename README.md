@@ -250,6 +250,10 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
   - Documented the real tool schemas, the result envelope and the WSL setup.
   - Made the intake questions a hard stop before planning.
   - Added venv setup.
+- **Sixth live test fixes.**
+  - `square_occurrence.py` now moves the top-level occurrence that holds the mesh. Fusion rejects setting the placement of a nested occurrence (`3 : invalid argument value`). It refuses to move an occurrence that also holds other geometry unless `ALLOW_SIBLINGS=True`.
+  - New `mesh_views.py --mark "x,y,z:label"` labels features in the views, so questions about features can be answered visually.
+  - `fusion-api.md` notes `getAsCoordinateSystem` returning 4 values and `isGrounded` failing on native sub-component occurrences.
 - **Fifth live test fixes.**
   - `mesh_analyze.py` now infers the design intent of each pattern axis (`design_hint`): odd pitch over a round span means Extent (for example "20 over 141"), and it detects repeated blocks ("2 identical blocks at 60, so pattern the pattern").
   - `mesh_align.py` reports the correction as a single rotation ("10° about Z"). It ignores tiny curved-surface facets when finding flat directions, and only judges faces meant to be square. Deliberately angled braces no longer raise a false tilt warning.

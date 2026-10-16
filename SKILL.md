@@ -129,7 +129,10 @@ cp /mnt/c/Users/Public/mesh_local.stl /mnt/c/Users/Public/mesh_world.stl .
 # 5. one Fusion screenshot for context (label it "not yet squared")
 python3 $S/fusion_mcp.py screenshot --direction iso-top-right --out fusion_iso.png
 # --- STOP: report and ask (including permission to square the reference) ---
-# 6. after approval: square the reference mesh, verify, retake screenshots
+# when asking about specific features: label them in the views
+.venv/bin/python $S/mesh_views.py part_aligned.stl --out features.png --mark "x,y,z:A Ø56 dome" --mark "x,y,z:B ..."
+# 6. after approval: square the reference mesh (moves its TOP-LEVEL occurrence; refuses if
+#    that occurrence holds other geometry), verify, retake screenshots
 python3 $S/fusion_mcp.py run $S/fusion/square_occurrence.py --write \
     --set ALIGN_MM="$(python3 -c 'import json;print(json.load(open("align.json"))["transform_mm"])')"
 ```
