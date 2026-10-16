@@ -209,7 +209,7 @@ to fix. The exit code is `0` for PASS and `1` for FAIL.
 
 ### `scripts/fusion_mcp.py` (runs on the agent side)
 A standard-library client for the official endpoint. Commands: `tools [--schema] [--json]`,
-`run script.py [--write]`, `screenshot --direction ...`, `directions`, `read '<json>'`,
+`run script.py [--write] [--set NAME=VALUE ...]`, `screenshot --direction ...`, `directions`, `read '<json>'`,
 `docs "<pattern>"`. It does the `initialize` handshake,
 keeps the `Mcp-Session-Id` header, parses the `{"message", "success"}` result envelope,
 raises with Fusion's traceback on failure, and decodes screenshots to PNG. Set
@@ -250,6 +250,13 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
   - Documented the real tool schemas, the result envelope and the WSL setup.
   - Made the intake questions a hard stop before planning.
   - Added venv setup.
+- **Fourth live test fixes.**
+  - New `fusion_mcp.py run --set NAME=VALUE` configures Fusion scripts from the command line. It uses the Python parser, so docstrings are never touched.
+  - Scripts now ship executable.
+  - `mesh_analyze.py --json` alone prints JSON to stdout.
+  - Grid detection now handles gaps (for example two blocks of vents with a missing band) and reports `values`, `gaps` and `centres`.
+  - `mesh_views.py --out` accepts a folder or a name without an extension.
+  - `SKILL.md` now has an exact command recipe for the mesh workflow.
 - **Squaring up.**
   - New `mesh_align.py`: smallest-rotation squaring to the world axes, origin placement, transform output.
   - New `mesh_views.py`: square orthographic renders.

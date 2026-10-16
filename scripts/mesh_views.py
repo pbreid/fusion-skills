@@ -31,6 +31,12 @@ def main():
     ap.add_argument("mesh"); ap.add_argument("--out", default="views.png")
     ap.add_argument("--max-faces", type=int, default=60000)
     a = ap.parse_args()
+    import os
+    if os.path.isdir(a.out) or a.out.endswith(("/", os.sep)):
+        os.makedirs(a.out, exist_ok=True)
+        a.out = os.path.join(a.out, "views.png")
+    elif not os.path.splitext(a.out)[1]:
+        a.out += ".png"
     m = trimesh.load(a.mesh, force="mesh")
     if len(m.faces) > a.max_faces:
         idx = np.argsort(-m.area_faces)[:a.max_faces]   # keep the largest faces

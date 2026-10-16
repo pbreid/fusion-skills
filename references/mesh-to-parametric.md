@@ -52,8 +52,12 @@ route A is the default when the user says "parametric".
    - A residual > 0.5° means the dominant faces aren't mutually square (drafted or
      deliberately angled part). Report it and ask; don't force it.
    - **Everything downstream uses `part_aligned.stl`:** analysis, views, the build, comparison.
-3. **Square views for the report.** The Fusion viewport may still show the skewed mesh, so
-   render true orthographic views agent-side:
+3. **Square views for the report.** Fusion screenshots show the design as it is. Until the
+   reference mesh is squared in Fusion (step 7), its front, top and right views are taken
+   against axes the part isn't aligned to, so they come out skewed. That's expected, not a
+   failure. In the Phase 1 report, use the agent-side renders as the
+   orthographic views and include at most one Fusion iso screenshot, **labelled
+   "Fusion viewport, not yet squared"**. Render true orthographic views agent-side:
    `.venv/bin/python scripts/mesh_views.py part_aligned.stl --out views.png` (front/top/right/iso).
    Then analyse the aligned mesh:
    ```
@@ -93,14 +97,16 @@ route A is the default when the user says "parametric".
    section loops at each level, Z-levels (candidate extrude extents), symmetry.
 6. Build the new component with an **identity** occurrence transform (at the design origin,
    square to the axes). **Never** copy the reference mesh's tilted placement onto the new part.
-7. Optional, with the user's OK: square the reference mesh in Fusion with
+7. Recommended, with the user's OK (ask at the checkpoint): square the reference mesh in Fusion with
    `scripts/fusion/square_occurrence.py` (paste `align.json` → `transform_mm` into `ALIGN_MM`).
    It re-places only the mesh's occurrence, composing the alignment with its current placement.
    Then the mesh overlays the new part exactly and Fusion screenshots are square. Verify by
    re-exporting the mesh with `COORDS="world"`: extents and bbox must equal mesh_align's
    `extents_after` / `bbox_after`. If the mesh sits in the root component (no occurrence),
    ask the user. The options are moving it into a component, or a Move feature on the mesh
-   body (this adds a timeline item).
+   body (this adds a timeline item). **After squaring, retake the Fusion screenshots**
+   (iso-top-right, front, top, right). They should now match `views.png`. Use the Fusion
+   screenshots from then on.
 
 ## 2. Recover design intent from the numbers
 - **Snap to nominal**: measured 3.39-3.42 -> 3.4 (M3 clearance); 5.98 -> 6.0. Mesh

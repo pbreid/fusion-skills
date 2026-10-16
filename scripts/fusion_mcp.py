@@ -17,7 +17,9 @@ CLI:
   fusion_mcp.py tools [--schema] [--json]   list tools (--json = machine-readable)
   fusion_mcp.py directions                  valid screenshot directions
   fusion_mcp.py read '{"queryType":"..."}'  raw read call
-  fusion_mcp.py run script.py [--write]     execute a Fusion script (read-only unless --write)
+  fusion_mcp.py run script.py [--write] [--set NAME=VALUE ...]
+                                            execute a Fusion script (read-only unless --write);
+                                            --set overrides the script's top-level constants
   fusion_mcp.py screenshot [--direction iso-top-right] [--out shot.png] [--width 1200 --height 900]
   fusion_mcp.py docs "PolygonMesh"          API documentation query (args vary; see --schema)
 Env: FUSION_MCP_URL (default http://127.0.0.1:27182/mcp)
@@ -133,6 +135,26 @@ class FusionMCP:
         raise RuntimeError(f"no image in screenshot result: {text[:300]}")
 
 
+def apply_sets(src, sets):
+    """Replace top-level `NAME = ...` assignments (found with the Python parser, so docstrings
+    and comments are never touched) so Fusion scripts can be configured from the CLI."""
+    import ast
+    for item in sets:
+        name, _, value = item.partition("=")
+        name = name.strip()
+        ast.literal_eval(value)                 # must be a valid Python literal
+        tree = ast.parse(src)
+        node = next((n for n in tree.body if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Name) and t.id == name for t in n.targets)), None)
+        if node is None:
+            raise RuntimeError(f"--set {name}: no top-level '{name} = ...' assignment in the script")
+        lines = src.splitlines(keepends=True)
+        end_line = getattr(node, "end_lineno", node.lineno)
+        lines[node.lineno - 1:end_line] = [f"{name} = {value}\n"]
+        src = "".join(lines)
+    return src
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -140,6 +162,10 @@ def main():
     t.add_argument("--json", action="store_true", help="machine-readable tools/list output")
     r = sub.add_parser("read"); r.add_argument("args")
     x = sub.add_parser("run"); x.add_argument("script"); x.add_argument("--write", action="store_true")
+    x.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                   help="override a top-level constant in the script before sending, e.g. "
+                        "--set COORDS='\"world\"' --set OUT_PATH='r\"C:\\Users\\Public\\m.stl\"'. "
+                        "VALUE is a Python literal")
     s = sub.add_parser("screenshot"); s.add_argument("--direction", default="iso-top-right",
         help="e.g. iso-top-right, front, top, right (run 'directions' for the full list)")
     s.add_argument("--out", default="fusion_shot.png"); s.add_argument("--width", type=int, default=1200)
@@ -162,7 +188,7 @@ def main():
         env, content = f.read(**json.loads(a.args))
         print(json.dumps(env, indent=1)[:20000])
     elif a.cmd == "run":
-        out = f.run_script(open(a.script).read(), read_only=not a.write)
+        out = f.run_script(apply_sets(open(a.script).read(), a.set), read_only=not a.write)
         print(json.dumps(out, indent=1) if not isinstance(out, str) else out)
     elif a.cmd == "screenshot":
         print(f.screenshot(a.out, a.direction, a.width, a.height))

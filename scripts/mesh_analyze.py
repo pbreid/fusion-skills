@@ -34,8 +34,10 @@ All lengths are reported in the mesh's units (default mm). Fusion API uses cm.
   body_breakdown: {count, significant, fragments, fragment_area_pct, list[]: {triangles, area_pct,
                    watertight, volume, bbox_min, bbox_max}}
   cylinder_groups[]: {kind (hole|boss|fillet), diameter, axis, count, lengths[],
-                   stations_along_axis[], <X|Y|Z>_values: {n, min, max, pitch, regular},
+                   stations_along_axis[], <X|Y|Z>_values: {n, min, max, pitch, regular,
+                   gaps[[after_value, n_missing]], values[]}, centres[[x,y,z]],
                    grid_cells_per_station, fills_grid}    <- use this for hole patterns
+               (regular=true with gaps = a pitch grid with missing rows/columns, e.g. two blocks)
   sections_at[]: same shape as sections[] plus axis, from --section-at
 """
 import argparse, json, math, sys
@@ -188,13 +190,19 @@ def cylinder_regions(mesh, min_faces=8, rad_tol=0.03):
 
 
 def _pitch(vals):
+    """Unique positions, base pitch, and whether they sit on that pitch (allowing gaps).
+    Returns (values, pitch, regular, gaps) where gaps lists [after_value, missing_count]."""
     u = np.unique(np.round(vals, 1))
     if len(u) < 2:
-        return u.tolist(), None, True
+        return u.tolist(), None, True, []
     d = np.diff(u)
-    med = float(np.median(d))
-    regular = bool(np.all(np.abs(d - med) < max(0.05 * med, 0.15)))
-    return u.tolist(), round(med, 3), regular
+    base = float(np.min(d))
+    near = d[np.abs(d - base) < max(0.08 * base, 0.15)]
+    pitch = float(np.mean(near)) if len(near) else base
+    k = d / pitch
+    on_grid = bool(np.all(np.abs(k - np.round(k)) < 0.08))
+    gaps = [[float(u[i]), int(round(k[i])) - 1] for i in range(len(d)) if round(k[i]) > 1]
+    return u.tolist(), round(pitch, 3), on_grid, gaps
 
 
 def cylinder_groups(cyls):
@@ -212,14 +220,16 @@ def cylinder_groups(cyls):
              "count": len(cs), "lengths": sorted({round(c["length"], 2) for c in cs})[:6]}
         if isinstance(ax, str):
             ai = "XYZ".index(ax)
-            stations, _, _ = _pitch(P[:, ai])          # walls/levels the holes sit on
+            stations = _pitch(P[:, ai])[0]             # walls/levels the holes sit on
             g["stations_along_axis"] = stations[:12]
             for k in (0, 1, 2):
                 if k == ai:
                     continue
-                vals, pitch, regular = _pitch(P[:, k])
+                vals, pitch, regular, gaps = _pitch(P[:, k])
                 g["%s_values" % "XYZ"[k]] = {"n": len(vals), "min": vals[0], "max": vals[-1],
-                                            "pitch": pitch, "regular": regular}
+                                            "pitch": pitch, "regular": regular,
+                                            "gaps": gaps, "values": vals[:200]}
+            g["centres"] = np.round(P, 2).tolist()[:1000]   # base points (min end along axis)
             n_grid = np.prod([g["%s_values" % "XYZ"[k]]["n"] for k in (0, 1, 2) if k != ai])
             g["grid_cells_per_station"] = int(n_grid)
             g["fills_grid"] = bool(len(cs) == n_grid * max(len(stations), 1))
@@ -328,7 +338,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("mesh")
     ap.add_argument("--units", default="mm", help="units the file is authored in (STL has none)")
-    ap.add_argument("--json", help="write full report here")
+    ap.add_argument("--json", nargs="?", const="-", help="write full report to this path; "
+                    "'--json' alone or '--json -' prints ONLY the JSON to stdout (no text summary)")
     ap.add_argument("--sections", type=int, default=5)
     ap.add_argument("--axis", default="auto", help="section/build axis: auto|x|y|z")
     ap.add_argument("--tol", type=float, default=0.05, help="geometric tolerance in mesh units")
@@ -432,6 +443,9 @@ def main():
     rep["levels_along_axis"] = [round(float(h), 4) for h in hs]
 
     txt = json.dumps(rep, indent=1, default=float)
+    if a.json == "-":
+        print(txt)
+        return
     if a.json:
         open(a.json, "w").write(txt)
     # concise console summary
@@ -454,7 +468,9 @@ def main():
     for g in rep["cylinder_groups"][:15]:
         grid = ""
         if isinstance(g["axis"], str):
-            dims = [f"{k[0]}:{v['n']}@{v['pitch']}{'' if v['regular'] else '(irregular)'}"
+            dims = [f"{k[0]}:{v['n']}@{v['pitch']}"
+                    + ("" if v["regular"] else "(irregular)")
+                    + ("".join(f" gap after {a_} (-{n_})" for a_, n_ in v["gaps"]) if v["gaps"] else "")
                     for k, v in g.items() if k.endswith("_values")]
             grid = f" stations {g['stations_along_axis'][:4]} grid {' '.join(dims)}"
         print(f"  {g['kind']:<7} Ø{g['diameter']:<6} {str(g['axis']):<4} x{g['count']:<4} len {g['lengths'][:3]}{grid}")

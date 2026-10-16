@@ -63,6 +63,9 @@ sources these rules came from, for when you need to look something up.
   One purpose per sketch. Use construction lines for logic. Avoid projecting edges.
 - **Features:** base feature first, then adds/cuts, holes, then patterns/mirrors (as features,
   not sketch patterns), then draft/shell, **fillets and chamfers last**.
+- **Fusion screenshots show the design as it is.** If the reference mesh is still at its
+  tilted placement, Fusion's front, top and right shots are skewed. Use `mesh_views.py` renders
+  until the mesh has been squared with `square_occurrence.py` (with the user's OK), then retake them.
 - **Square to the world axes, always.** New parts are built at the design origin with their main
   faces on the origin planes, whatever tilt the source mesh or reference has. Never copy a
   tilted placement onto a new component. Use `mesh_align.py` for meshes.
@@ -101,7 +104,47 @@ The final summary to the user lists: parameters created (name = value), componen
 verification results (e.g. mesh deviation p95, interference check), assumptions made, and
 anything left for them to decide.
 
-## 4. Scripts in this skill
+## 4. Mesh workflow: exact commands (copy these; don't improvise flags)
+
+```bash
+S=~/.agents/skills/fusion360/scripts      # wherever the skill is installed
+cd ~/remodel                              # working folder: venv, exports, reports, images
+python3 -m venv .venv && .venv/bin/pip install -q trimesh numpy scipy shapely rtree networkx matplotlib  # once
+PUB='r"C:\Users\Public'                  # Fusion-side folder visible to the agent (WSL: /mnt/c/Users/Public)
+
+# 1. inspect (read-only; output is JSON)
+python3 $S/fusion_mcp.py run $S/fusion/inspect_design.py > inspect.json
+# 2. export the mesh: local (scale gate) + world (what the user sees). Read-only - no --write
+python3 $S/fusion_mcp.py run $S/fusion/export_mesh_body_stl.py --set COORDS='"local"' --set OUT_PATH="$PUB\mesh_local.stl\""
+python3 $S/fusion_mcp.py run $S/fusion/export_mesh_body_stl.py --set COORDS='"world"' --set OUT_PATH="$PUB\mesh_world.stl\""
+cp /mnt/c/Users/Public/mesh_local.stl /mnt/c/Users/Public/mesh_world.stl .
+# 3. scale gate (extents from inspect.json mesh bbox)
+.venv/bin/python $S/mesh_analyze.py mesh_local.stl --expect-extents 156,204,142.5 --sections 2
+# 4. square it, render square views, analyse the squared mesh
+.venv/bin/python $S/mesh_align.py mesh_world.stl part_aligned.stl --json align.json
+.venv/bin/python $S/mesh_views.py part_aligned.stl --out views.png
+.venv/bin/python $S/mesh_analyze.py part_aligned.stl --sections 9                        # text summary
+.venv/bin/python $S/mesh_analyze.py part_aligned.stl --sections 9 --json report.json     # full JSON file
+.venv/bin/python $S/mesh_analyze.py part_aligned.stl --section-at x=76.75,z=10           # extra slices
+# 5. one Fusion screenshot for context (label it "not yet squared")
+python3 $S/fusion_mcp.py screenshot --direction iso-top-right --out fusion_iso.png
+# --- STOP: report and ask (including permission to square the reference) ---
+# 6. after approval: square the reference mesh, verify, retake screenshots
+python3 $S/fusion_mcp.py run $S/fusion/square_occurrence.py --write \
+    --set ALIGN_MM="$(python3 -c 'import json;print(json.load(open("align.json"))["transform_mm"])')"
+```
+Notes:
+- `fusion_mcp.py run ... --set NAME=VALUE` overrides a script's top-level constant (VALUE is
+  a Python literal). Never `sed` a copy of a skill script.
+- `mesh_analyze.py --json` alone prints only JSON to stdout. `--json file` writes a file and
+  prints the text summary. Don't redirect the text summary into a .json file.
+- Hole patterns, gaps and hole centres are in `cylinder_groups` (`values`, `gaps`, `centres`).
+  Don't slice with trimesh yourself. A `fillet` group sharing a hole group's Ø, axis and grid
+  is the same holes cut through by other geometry (for example where a floor meets the wall).
+- If Fusion runs on the same machine (no WSL), set OUT_PATH to the working folder directly
+  and skip the `cp`.
+
+## 5. Scripts in this skill
 
 - `scripts/fusion_mcp.py` - stdlib client for the official Fusion MCP over HTTP (handshake,
   session header, envelope parsing, `run`, `screenshot`, `directions`, `tools --json`, `docs`).
