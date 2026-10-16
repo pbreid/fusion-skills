@@ -91,6 +91,57 @@ curve (keeps downstream IDs).
 Order in the timeline = order of intent, not order of creation; reorder when it helps.
 The timeline is a time machine: a sketch cannot reference geometry created after it.
 
+## 5a. Repeated features (holes, vents, ribs, bosses, slots)
+**Never model repeated features one by one.** Model one seed and pattern it as a feature,
+or mirror it. Forty identical holes are one Hole feature plus one pattern, with every
+number in a parameter. Hand-placed copies break the moment the pitch, panel size or count
+changes, and they bloat the timeline.
+
+**Decide the pattern type from the data.** For meshes, use `cylinder_groups` in the analyzer
+report: count, pitch per axis, `regular`, `fills_grid`, and `stations_along_axis` (which walls).
+
+| What you see | Model it as |
+|---|---|
+| Regular rows × columns (`regular: true` on both axes) | One seed + **rectangular pattern**, two directions |
+| Same grid on two opposite walls (two stations, symmetric) | Pattern on one wall + **mirror** feature across the symmetry plane. Alternatively, one seed cut that pierces both walls (Through All or To Object), but only if nothing else lies on that line; set **participant bodies** so internal ribs aren't cut |
+| Staggered / hex grid | Two rectangular patterns of two seeds, the second offset by half a pitch, or one pattern whose seed is a pair of holes |
+| Holes on a PCD / around an axis | One seed + **circular pattern** (quantity, total angle, symmetric if needed) |
+| Along a curve or edge | **Pattern on path** |
+| `fills_grid: false` (positions missing, e.g. behind a boss or a cut-out) | Full rectangular pattern, then **suppress instances**, or let a later solid feature fill them if that is the design intent. Prefer suppression when the gaps are few and fixed; prefer a bounded field when the gaps follow another feature's outline |
+| Irregular spacing, a few instances | Separate features or several sketch points on one Hole feature, each dimensioned. Don't force a pattern |
+| A whole perforated *region* (vent field inside a boundary) | Seed + pattern sized to the region, or a dedicated vent generator if the field must clip to an arbitrary outline |
+
+**Parameterise the pattern so it follows the design.**
+- Use `vent_d`, `vent_pitch_y`, `vent_pitch_z`, `vent_n_y`, `vent_n_z`, and the seed position
+  from a datum (`vent_y0`, `vent_z0`). Dimension the seed from origin or skeleton geometry, not
+  from model edges.
+- Where the field should fill a panel, derive the count:
+  `vent_n_y = floor((panel_h - 2*vent_margin) / vent_pitch_y) + 1`, and centre the field with
+  the seed offset `(panel_h - (vent_n_y - 1)*vent_pitch_y) / 2`. Changing the panel size then
+  re-flows the grid. Fusion expressions support `floor`, `ceil` and `round`.
+- Use **Spacing** distance type when the pitch is the design value. Use **Extent** when the
+  overall span is the design value and the pitch is derived.
+
+**Performance with large counts.**
+- Hundreds of instances: set compute option **Identical** when every instance meets the same
+  geometry, as with holes through a flat wall. It is far faster. Use **Adjust** only when
+  instances must react to varying geometry, such as holes ending on a curved face.
+- Pattern the **feature** (the cut), not the body.
+- Keep the seed sketch tiny: one circle, dimensioned.
+- Create large patterns late, just before fillets, and suppress them while editing upstream
+  geometry if recompute gets slow.
+
+**Seeds and fillets.** Edge fillets or chamfers on patterned holes go on the **seed** before
+patterning (pattern both features together), or are patterned with it. Never fillet hundreds
+of instance edges afterwards.
+
+**Verify patterns explicitly.**
+- Instance count in the model equals the analyzer count.
+- First and last instance positions are measured against the source.
+- No instance breaks into a rib or edge.
+- Flex test: change the pitch and the panel size, and confirm the grid re-flows without
+  timeline errors.
+
 ## 6. Parameters
 - Create **user parameters first**; names lower_snake, intent-revealing, with units and a
   comment. Group by prefix (`pcb_`, `wall_`, `boss_`).

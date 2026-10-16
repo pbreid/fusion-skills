@@ -86,6 +86,15 @@ pat_in = comp.features.rectangularPatternFeatures.createInput(entities, comp.xCo
           VI.createByReal(n1), VI.createByString("pitch_x"),
           adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
 pat_in.setDirectionTwo(comp.yConstructionAxis, VI.createByReal(n2), VI.createByString("pitch_y"))
+# quantities can be expressions too: VI.createByString("vent_n_y") or "floor(span/pitch) + 1"
+pat_in.patternComputeOption = adsk.fusion.PatternComputeOptions.IdenticalPatternCompute  # big counts
+pat = comp.features.rectangularPatternFeatures.add(pat_in)
+# skip instances (gaps in the grid): PatternElement.isSuppressed, or set the ids in one go
+for el in pat.patternElements:
+    if should_skip(el):                  # e.g. by el.transform translation vs a keep-out
+        el.isSuppressed = True           # see also pat.suppressedElementsIds
+# pattern several features together (seed hole + its chamfer): put all in `entities`
+# directions: construction axes, sketch lines or linear edges; flip with negative distance/expression
 circ_in = comp.features.circularPatternFeatures.createInput(entities, axis); circ_in.quantity = VI.createByReal(6)
 mir_in  = comp.features.mirrorFeatures.createInput(entities, comp.yZConstructionPlane)
 

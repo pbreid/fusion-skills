@@ -22,6 +22,11 @@
 - [ ] `export_bodies_stl.py` -> `mesh_compare.py --tol <agreed>`: PASS both directions.
 - [ ] Report mean / p95 / max deviation and which nominal snaps were applied.
 
+## Patterns
+- [ ] Every repeated feature is a pattern or mirror (no hand-placed copies).
+- [ ] Instance counts match the source or spec; first and last positions measured.
+- [ ] Changing pitch, count or panel size re-flows the pattern with no errors.
+
 ## Flex test (robustness)
 - [ ] Change 2-3 driving parameters (e.g. +20 % width, different hole count/pitch) ->
       recompute -> no errors, geometry follows intent (holes stay inset, symmetry holds).

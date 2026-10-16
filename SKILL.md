@@ -63,6 +63,9 @@ sources these rules came from, for when you need to look something up.
   One purpose per sketch. Use construction lines for logic. Avoid projecting edges.
 - **Features:** base feature first, then adds/cuts, holes, then patterns/mirrors (as features,
   not sketch patterns), then draft/shell, **fillets and chamfers last**.
+- **Repeated features are never modelled one by one.** Use a seed + rectangular, circular or
+  path pattern, or a mirror, with counts and pitch in parameters, Identical compute for large
+  counts, and suppressed instances for gaps. See modeling-principles.md §5a.
 - **Name** every component, body, sketch and key feature; group timeline runs.
 - **Small steps, verify each.** One logical feature per script call; after each, check the
   returned report (bodies, bbox in mm, timeline health) and take a screenshot at milestones.
