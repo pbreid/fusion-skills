@@ -387,9 +387,8 @@ def main():
     if obb_ext is not None:
         rep["oriented_bbox_extents"] = np.round(obb_ext, 4).tolist()
     if aligned is False:
-        rep["alignment_advice"] = ("Part is rotated relative to world axes. Align it first "
-                                   "(trimesh: mesh.apply_transform(oriented_bounds T) or Fusion Move) "
-                                   "so sketches can sit on origin planes.")
+        rep["alignment_advice"] = ("Part is rotated relative to world axes. Square it first: "
+                                   "mesh_align.py in.stl aligned.stl --json align.json")
 
     rep["cylinders"] = cylinder_regions(mesh)
     claimed = frozenset(i for c in rep["cylinders"] for i in c.pop("_face_ids"))
@@ -402,9 +401,9 @@ def main():
         if aligned:
             rep.pop("alignment_advice", None)
         else:
-            rep["alignment_advice"] = ("Dominant faces/axes are not on world axes. Align first "
-                                       "(trimesh oriented_bounds transform, or Fusion Move) so sketches "
-                                       "can sit on origin planes.")
+            rep["alignment_advice"] = ("Dominant faces/axes are not on world axes. Square it first: "
+                                       "mesh_align.py in.stl aligned.stl --json align.json, then "
+                                       "analyse aligned.stl.")
     axis_idx = {"x": 0, "y": 1, "z": 2}.get(a.axis.lower())
     if axis_idx is None:
         # build axis = the axis-aligned direction carrying the most planar area (typical extrude dir)

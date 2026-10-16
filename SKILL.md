@@ -28,14 +28,14 @@ that looks right.
 4. Agent-side Python: create a venv once **in the working folder, not inside the skill
    folder** (`python3 -m venv .venv && .venv/bin/pip install trimesh numpy scipy shapely rtree
    networkx`). System pip is often blocked (PEP 668), and `python` may not exist, so use
-   `python3` or `.venv/bin/python`. Keep exports, reports and screenshots in the working
+   `python3` or `.venv/bin/python`. Add `matplotlib` for `mesh_views.py`. Keep exports, reports and screenshots in the working
    folder too.
 
 ## 1. Route the request
 
 | User wants | Read | Then |
 |---|---|---|
-| Mesh (STL/OBJ/3MF) -> parametric model | `references/mesh-to-parametric.md` | export with `export_mesh_body_stl.py` (mm), analyse with `mesh_analyze.py --expect-extents`, **stop and ask intake questions**, rebuild, verify with `mesh_compare.py` |
+| Mesh (STL/OBJ/3MF) -> parametric model | `references/mesh-to-parametric.md` | export with `export_mesh_body_stl.py` (mm, scale gate), **square it with `mesh_align.py`**, render views with `mesh_views.py`, analyse with `mesh_analyze.py`, **stop and ask intake questions**, rebuild square at the origin, verify with `mesh_compare.py` |
 | New part from dimensions / sketch / photo / description | `references/part-from-spec.md` | design-intent plan -> parameters -> build |
 | Enclosure, PCB housing, multi-part assembly, joints, 3D-print/CNC fits | `references/enclosures-assemblies.md` | skeleton/master sketch -> components -> joints |
 | Edit an existing design | `references/modeling-principles.md` §Editing | inspect, change the driving parameter or earliest sketch |
@@ -63,6 +63,9 @@ sources these rules came from, for when you need to look something up.
   One purpose per sketch. Use construction lines for logic. Avoid projecting edges.
 - **Features:** base feature first, then adds/cuts, holes, then patterns/mirrors (as features,
   not sketch patterns), then draft/shell, **fillets and chamfers last**.
+- **Square to the world axes, always.** New parts are built at the design origin with their main
+  faces on the origin planes, whatever tilt the source mesh or reference has. Never copy a
+  tilted placement onto a new component. Use `mesh_align.py` for meshes.
 - **Repeated features are never modelled one by one.** Use a seed + rectangular, circular or
   path pattern, or a mirror, with counts and pitch in parameters, Identical compute for large
   counts, and suppressed instances for gaps. See modeling-principles.md §5a.
@@ -108,14 +111,19 @@ anything left for them to decide.
   `--expect-extents X,Y,Z` aborts on a scale mismatch; `--scale` rescales; `--section-at z=60,x=-68`
   slices at exact positions. Also reports `cylinder_groups` (hole patterns with count and grid
   pitch) and `body_breakdown` (real bodies vs tessellation fragments).
+- `scripts/mesh_align.py` - square a mesh to the world axes with the smallest rotation (keeps up
+  and front), set the origin, write the aligned STL and `transform_mm`.
+- `scripts/mesh_views.py` - square orthographic front/top/right/iso renders of an STL (needs matplotlib).
 - `scripts/mesh_compare.py` - two-way deviation between source mesh and rebuilt STL, PASS/FAIL
   against a tolerance, and where the worst regions are.
 - `scripts/fusion/inspect_design.py` - read-only JSON snapshot of the active design.
 - `scripts/fusion/build_template.py` - the house pattern for API builds (parameters,
   component-first, constrained sketches, feature pattern, fillets last, report). Copy its helpers.
 - `scripts/fusion/export_bodies_stl.py` - tessellate B-rep bodies to a mm STL in world coords for comparison.
-- `scripts/fusion/export_mesh_body_stl.py` - write an imported **mesh** body to a mm STL in world
-  coords (handles PolygonMesh, cm→mm, occurrence transform) and print its extents.
+- `scripts/fusion/export_mesh_body_stl.py` - write an imported **mesh** body to a mm STL, in the local
+  or world frame (handles PolygonMesh, cm→mm, occurrence transform), and print its extents.
+- `scripts/fusion/square_occurrence.py` - (write, ask first) re-place the reference mesh's occurrence
+  so it sits square, using mesh_align's transform. Moves the placement only, not the geometry.
 
 Fusion-side scripts expose `run(context)` (official MCP convention). For REPL-style servers,
 uncomment the final `run(None)` line. `inspect_design.py` and `export_mesh_body_stl.py` use API

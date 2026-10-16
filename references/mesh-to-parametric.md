@@ -26,35 +26,52 @@ route A is the default when the user says "parametric".
 
 ## 1. Intake (always)
 1. **Get the mesh onto the agent side** - analysis runs in the agent's Python, not in Fusion.
-   - If the user has the original STL file, use it directly.
+   - If the user has the original STL file, use it directly (then skip to step 2).
    - If the mesh only exists in the open Fusion design, run
-     `scripts/fusion/export_mesh_body_stl.py` (set `MESH_NAME`/`OUT_PATH`). It writes
-     **mm** in the component's local frame (see step 2) and prints `extents_mm`. Do not write your own exporter:
+     `scripts/fusion/export_mesh_body_stl.py` twice, once with `COORDS="local"` and once with
+     `COORDS="world"`. Both write **mm** and print `extents_mm`. Do not write your own exporter:
      Fusion's mesh coordinates are **cm** and the PolygonMesh API has traps (see fusion-api.md).
-2. **Frame check.** The exporter's default is `COORDS="local"`: the mesh component's own
-   frame. That matches the inspect_design bbox and is usually the frame the original CAD was
-   built in. If `occurrence_transform.rotated` is true (or inspect_design shows a rotated
-   occurrence), **analyse and build in the local frame**. Create the new component on origin
-   planes, then set its occurrence transform equal to the mesh occurrence's so the two
-   overlay (or ask the user where the part should sit). Never sketch on a tilted world frame
-   just because the mesh was placed that way. Export with `COORDS="world"` only for
-   overlay comparisons against world-placed parts.
-3. **Scale gate.** `extents_mm` (or the source file's extents) must match the bbox from
-   `inspect_design.py` (both in the component's local frame). Run the analyzer with that cross-check:
+   - **Scale gate:** the local export's extents must match the bbox from `inspect_design.py`.
+     Check with `mesh_analyze.py --expect-extents X,Y,Z` (exit `SCALE MISMATCH` on ×10, ×25.4
+     or ×1000). Never continue on a mismatched scale: every snapped dimension and the
+     tolerance itself would be wrong.
+2. **Square it up - always.** The finished model must sit square to the world axes at the
+   design origin, the way anyone would model it. Its main faces go on the origin planes,
+   whatever tilt the source mesh has.
    ```
-   .venv/bin/python scripts/mesh_analyze.py part.stl --units mm --sections 7 \
-       --expect-extents 156,204,142.5 --json part_report.json
+   .venv/bin/python scripts/mesh_align.py part_world.stl part_aligned.stl --json align.json
    ```
-   It exits with `SCALE MISMATCH` on a ×10 / ×25.4 / ×1000 error. Fix the export (or pass
-   `--scale`). Never continue on a mismatched scale: every snapped dimension and the
-   tolerance itself would be wrong.
+   - Input: the **world** export (what the user sees), or the user's STL file.
+   - It finds the dominant flat-face directions and applies the **smallest** rotation that puts
+     them on the axes. An 8° placement skew is removed while the visible up and front are
+     kept. It reports the correction per axis and the residual (should be ~0°).
+   - Default origin: X/Y centred, base on Z=0 (`--origin center-base`). Use `--origin center` when
+     the part is symmetric top-to-bottom and that plane should be a datum.
+   - If the user wants a different up or front, add `--then-rotate x:90` etc. Ask when it's
+     not obvious, and show the views below.
+   - A residual > 0.5° means the dominant faces aren't mutually square (drafted or
+     deliberately angled part). Report it and ask; don't force it.
+   - **Everything downstream uses `part_aligned.stl`:** analysis, views, the build, comparison.
+3. **Square views for the report.** The Fusion viewport may still show the skewed mesh, so
+   render true orthographic views agent-side:
+   `.venv/bin/python scripts/mesh_views.py part_aligned.stl --out views.png` (front/top/right/iso).
+   Then analyse the aligned mesh:
+   ```
+   .venv/bin/python scripts/mesh_analyze.py part_aligned.stl --units mm --sections 7 --json part_report.json
+   ```
+   (the scale gate already ran on the local export, so `--expect-extents` is optional here;
+   extents are the same numbers, possibly in a different axis order).
 4. **STOP and ask the user before planning.** This is a hard stop, especially if the user
    invited questions. Send one short message covering:
    - units confirmed (state the measured extents back to them)
    - target **tolerance** (offer the default: 0.1 mm printed, 0.05 mm machined interfaces)
    - which features are **functional** (bores, mating faces, hole patterns, fastener sizes)
      versus cosmetic
-   - intended **process/material**, and whether to keep the current orientation or re-datum
+   - intended **process/material**
+   - the squared orientation: show `views.png`, state the correction applied ("removed an 8.5°
+     skew about Z; 204 mm is height (Z)"), and ask if up, front and origin are right
+   - whether to also square the **reference mesh** in Fusion (moves its placement only,
+     undoable), so the viewport, screenshots and overlay line up. See step 7
    - anything odd the analysis found (rotation off-axis, multiple bodies, open mesh, no
      symmetry where symmetry was expected)
    Include a screenshot and the headline analysis numbers so the user can answer quickly.
@@ -74,9 +91,16 @@ route A is the default when the user says "parametric".
    Then: extents/units warning, watertight/bodies, through-hole count (genus), whether it is
    axis-aligned, dominant planes, cylinders (holes/bosses/fillets with diameters and axes),
    section loops at each level, Z-levels (candidate extrude extents), symmetry.
-6. If not axis-aligned (check this only *after* the scale gate passes): align it (rotate so principal faces lie on origin planes, translate
-   so a datum - e.g. base face and symmetry centre - sits at the origin). Record the
-   transform; reconstruct in the aligned frame and compare against the aligned mesh.
+6. Build the new component with an **identity** occurrence transform (at the design origin,
+   square to the axes). **Never** copy the reference mesh's tilted placement onto the new part.
+7. Optional, with the user's OK: square the reference mesh in Fusion with
+   `scripts/fusion/square_occurrence.py` (paste `align.json` → `transform_mm` into `ALIGN_MM`).
+   It re-places only the mesh's occurrence, composing the alignment with its current placement.
+   Then the mesh overlays the new part exactly and Fusion screenshots are square. Verify by
+   re-exporting the mesh with `COORDS="world"`: extents and bbox must equal mesh_align's
+   `extents_after` / `bbox_after`. If the mesh sits in the root component (no occurrence),
+   ask the user. The options are moving it into a component, or a Move feature on the mesh
+   body (this adds a timeline item).
 
 ## 2. Recover design intent from the numbers
 - **Snap to nominal**: measured 3.39-3.42 -> 3.4 (M3 clearance); 5.98 -> 6.0. Mesh
@@ -130,11 +154,11 @@ Keep the reference mesh visible in screenshots to eyeball alignment (iso + top +
 ## 5. Verify (required before "done")
 1. Export the rebuilt body to STL in mm and world coords:
    `scripts/fusion/export_bodies_stl.py` (set BODY_NAMES). Get the file to the agent side.
-   **Compare like with like.** `export_bodies_stl.py` writes world coordinates, so re-export
-   the reference mesh with `COORDS="world"` for the comparison. If the two components share
-   the same occurrence transform, both land in the same place. A uniform offset or rotation
-   in the result means the placement differs, not the shape.
-2. `.venv/bin/python scripts/mesh_compare.py part.stl rebuild.stl --tol 0.1` (compare against the same mm reference the analysis used)
+   **Compare like with like.** The new part sits square at the origin, so compare its export
+   with **`part_aligned.stl`** (not the raw mesh). If you squared the reference mesh in Fusion
+   (step 7), a fresh `COORDS="world"` export of it is equivalent. A uniform offset or small
+   rotation in the result means the placement or origin choice differs, not the shape.
+2. `.venv/bin/python scripts/mesh_compare.py part_aligned.stl rebuild.stl --tol 0.1` (the squared reference the analysis used)
    - p95 deviation within tolerance in **both** directions -> PASS.
    - "missing" regions = original geometry you haven't modelled; "extra" = material you added
      that isn't there. Centroids tell you which feature; fix that feature and re-run.

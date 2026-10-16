@@ -35,13 +35,16 @@ fusion360/
 │   └── resources.md                 Sources the rules were distilled from, plus learning channels
 └── scripts/
     ├── mesh_analyze.py              Agent-side mesh analysis (planes, holes/bosses, sections, symmetry)
+    ├── mesh_align.py                Squares a mesh to the world axes (smallest rotation) and sets the origin
+    ├── mesh_views.py                Square orthographic front/top/right/iso renders of an STL
     ├── mesh_compare.py              Two-way deviation between source mesh and rebuild, PASS/FAIL
     ├── fusion_mcp.py                Stdlib client for the official Fusion MCP (CLI or import)
     └── fusion/                      Scripts executed *inside* Fusion via the MCP
         ├── inspect_design.py        Read-only JSON snapshot of the active design
         ├── build_template.py        Reference build pattern (parameters, constrained sketches, patterns, fillets, report)
         ├── export_bodies_stl.py     Tessellates solid bodies to a millimetre STL in world coordinates
-        └── export_mesh_body_stl.py  Writes an imported mesh body to a millimetre STL (local frame by default, or world)
+        ├── export_mesh_body_stl.py  Writes an imported mesh body to a millimetre STL (local frame by default, or world)
+        └── square_occurrence.py     Re-places the reference mesh so it sits square (placement only; asks first)
 ```
 
 ### How the skill is structured
@@ -69,7 +72,7 @@ enters context when it's needed (progressive disclosure). The scripts do determi
   ```bash
   cd ~/remodel          # your working folder, not the skill folder
   python3 -m venv .venv
-  .venv/bin/pip install trimesh numpy scipy shapely rtree networkx
+  .venv/bin/pip install trimesh numpy scipy shapely rtree networkx matplotlib
   ```
   Then run scripts by full path, for example
   `.venv/bin/python ~/.agents/skills/fusion360/scripts/mesh_analyze.py part.stl ...`.
@@ -173,6 +176,28 @@ It reports:
   circles and rectangles detected.
 - Candidate extrude levels and mirror symmetry.
 
+### `scripts/mesh_align.py` (runs on the agent side)
+```bash
+.venv/bin/python scripts/mesh_align.py part_world.stl part_aligned.stl --json align.json \
+    [--origin center-base|center|min|keep] [--then-rotate x:90]
+```
+Squares a part to the world axes the way you'd model it. It finds the dominant flat-face
+directions and applies the **smallest** rotation that puts them on X/Y/Z. An 8° placement
+skew is removed, but the visible up and front are kept. Turned parts with only one flat
+direction get that axis squared with no added spin. Default origin is X/Y centred with the
+base on Z=0. It reports the correction per axis and the residual tilt (should be ~0°), and
+writes `transform_mm` for `square_occurrence.py`. Tested on a DGX-shaped part with a
+90° + 10° placement (10.0° removed, 0.0° residual), on square parts (0° change), and on a
+tilted turned part (7.0° removed, no spurious spin).
+
+### `scripts/mesh_views.py` (runs on the agent side)
+```bash
+.venv/bin/python scripts/mesh_views.py part_aligned.stl --out views.png
+```
+Four orthographic views (front, top, right, iso) with mm axes, rendered from the aligned
+mesh. The report gets true square views even while the Fusion viewport still shows the
+part skewed.
+
 ### `scripts/mesh_compare.py` (runs on the agent side)
 ```bash
 .venv/bin/python scripts/mesh_compare.py original.stl rebuild.stl --tol 0.1 [--align] [--heatmap dev.ply]
@@ -196,6 +221,7 @@ raises with Fusion's traceback on failure, and decodes screenshots to PNG. Set
 | `inspect_design.py` | No | Prints JSON: document state, units, parameters, components, bodies (bbox in mm), sketches and their constraint status, mesh bodies, occurrences, timeline errors and warnings. |
 | `build_template.py` | **Yes** | A worked example: a 60×40×6 plate with a 2×2 hole pattern and filleted corners. It shows the conventions, and its helpers are meant to be copied: idempotent `param()`, `new_component()`, `centered_rectangle()`, `extrude()`, `cut_through_all()`, `fillet()`, `report()`. Run it in a new or scratch design. |
 | `export_bodies_stl.py` | No (it writes a file) | Writes the selected solid bodies as a binary STL in **mm**, in world coordinates. It can also print the STL as base64 when the agent can't see Fusion's filesystem. |
+| `square_occurrence.py` | **Yes (placement only)** | Applies mesh_align's `transform_mm` to the reference mesh's occurrence so it sits square at the origin, overlaying the new part. Builds the matrix from coordinate systems (no array-order ambiguity), prints before and after, and optionally captures position. Undoable. Ask the user first. |
 | `export_mesh_body_stl.py` | No (it writes a file) | Writes an imported **mesh** body (the STL you want to rebuild) as a binary STL in **mm**, and prints its extents and the occurrence transform. `COORDS="local"` (default) uses the mesh component's own frame for analysis and building; `COORDS="world"` is for comparing against `export_bodies_stl.py` output. Fusion's mesh API returns cm; this script converts. |
 
 All three expose `run(context)`, which is the convention the official MCP uses. For REPL-style
@@ -211,6 +237,8 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
 | `fusion_mcp.py` | Tested against a mock server that reproduces the live protocol (session header, SSE responses, result envelope, screenshot payload). |
 | `inspect_design.py` | **Run against live Fusion** (first real test, Oct 2026): worked first time. |
 | `export_mesh_body_stl.py` | **Run against live Fusion** (second test): correct mm output first time. That run exposed the rotated-occurrence case, which is now handled. |
+| `mesh_align.py`, `mesh_views.py` | Tested on synthetic parts (see above). |
+| `square_occurrence.py` | Written against documented API (`getAsCoordinateSystem`, `setWithCoordinateSystem`, `transform2`, `snapshots.add`); **not yet run live**. Verify with a world re-export as described in the workflow. |
 | `build_template.py`, `export_bodies_stl.py` | Syntax-checked and written against the documented API, **not yet run live**. Expect small fixes (deprecated names, hole/extrude direction). |
 | Official MCP tools | Verified live: `fusion_mcp_read`, `fusion_mcp_execute`, `fusion_mcp_update` and `fusion_mcp_electronics_read` on server "MCP Server Adapter" 1.0.0. Names may change between Fusion builds, so the skill still tells the agent to check `tools/list`. |
 
@@ -222,6 +250,13 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
   - Documented the real tool schemas, the result envelope and the WSL setup.
   - Made the intake questions a hard stop before planning.
   - Added venv setup.
+- **Squaring up.**
+  - New `mesh_align.py`: smallest-rotation squaring to the world axes, origin placement, transform output.
+  - New `mesh_views.py`: square orthographic renders.
+  - New `square_occurrence.py`: squares the reference mesh in Fusion.
+  - The workflow now always builds the new part square at the origin with an identity
+    placement, and no longer copies a tilted placement.
+  - Comparison is made against the aligned mesh.
 - **Third live test fixes.**
   - Hole detection now works on coarsely tessellated holes. They were being labelled as fillets.
   - New `cylinder_groups` output reports hole patterns with count and grid pitch.
