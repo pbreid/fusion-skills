@@ -21,14 +21,48 @@ Researched October 2026. Re-check if tools look different - Autodesk's MCP uses 
    Claude Desktop also has an official Autodesk Fusion connector in its directory.
 3. Fusion must be running **before** the client connects.
 
-### What the desktop MCP gives you
-Tool names are discovered at connection time. Observed capabilities: query the active
-document/design, execute Fusion **Python** API scripts in the live session (with a
-read-only option - an adapter hint, not a sandbox), viewport **screenshots** from named
-directions (current, top, front, iso...), and search of current **API documentation**.
-Autodesk's own sample (github.com/AutodeskFusion360/FusionMCPSample) uses the tool names
-`execute_api_script`, `get_screenshot`, `get_api_documentation`. Scripts follow the add-in
-convention `def run(context): ...`; output via `print`.
+### What the desktop MCP gives you (verified live, Oct 2026)
+Server identifies as **"MCP Server Adapter" 1.0.0**. Tool names may change between Fusion
+builds, so list them at connect time. On the build tested, they were:
+
+| Tool | Arguments | Use |
+|---|---|---|
+| `fusion_mcp_read` | `queryType` (required) + query-specific args | Design queries; `queryType: "screenshot"` with `direction` (e.g. `iso-top-right`, `top`, `front`), `width`, `height` returns a base64 PNG; `queryType: "apiDocumentation"` with `searchPattern` (plus optional `apiCategory`, `filter`) searches the API docs |
+| `fusion_mcp_execute` | `featureType: "script"`, `object: {script: "<python source>", readOnly: true\|false}` | Run a Fusion Python script. The key is **`script`**, not `code` |
+| `fusion_mcp_update` | `featureType: "undo" \| "redo"` | Undo/redo |
+| `fusion_mcp_electronics_read` | | Electronics documents only |
+
+Check the exact enums with `tools/list` (`inputSchema`). Guessed values such as
+`operation: "document_summary"` fail validation.
+
+**Script results come back as a JSON envelope inside the text content:**
+`{"message": "<everything the script printed>", "success": true}` or
+`{"error": "<Python traceback>", "success": false}`. Print JSON from scripts and parse it
+twice: the envelope, then `message`. Scripts define `def run(context):`; module-level code
+also runs. `readOnly` is an adapter hint, not a sandbox.
+
+**Protocol details (for clients without native MCP support):**
+- POST JSON-RPC to `http://127.0.0.1:27182/mcp` with
+  `Accept: application/json, text/event-stream`. Responses may be SSE (`event:`/`data:` lines).
+- `initialize` returns an **`Mcp-Session-Id` response header**. Send it on every later
+  request, including `notifications/initialized` (answered 202). Without it you get
+  HTTP 400 `{"error": "Missing MCP-Session-Id header"}`.
+- **Don't hand-roll this each session.** Use `scripts/fusion_mcp.py` (stdlib only):
+  ```bash
+  python3 scripts/fusion_mcp.py tools --schema
+  python3 scripts/fusion_mcp.py run scripts/fusion/inspect_design.py          # read-only
+  python3 scripts/fusion_mcp.py run my_build_step.py --write
+  python3 scripts/fusion_mcp.py screenshot --direction iso-top-right --out shot.png
+  python3 scripts/fusion_mcp.py docs "PolygonMesh"
+  ```
+  or `from fusion_mcp import FusionMCP; f = FusionMCP(); f.run_script(src, read_only=False)`.
+  `run_script` raises on `success: false` with Fusion's traceback and returns parsed JSON stdout.
+- Better still, register the server natively in the agent (OMP / Claude Code MCP config)
+  so the tools appear as first-class tool calls.
+
+Autodesk's sample add-in (github.com/AutodeskFusion360/FusionMCPSample) uses different names
+(`execute_api_script`, `get_screenshot`, `get_api_documentation`), which is another reason
+to read `tools/list` rather than assume.
 
 Autodesk's guidance for agents: start with a minimal working version, test early with
 heavier inputs (agents miss performance options such as deferred compute unless asked),
@@ -46,6 +80,11 @@ agent runs elsewhere (Linux box, devcontainer, remote server):
   --host <fusion-ip>` on the agent host). Its socket has **no auth** - trusted LAN only.
 Files written by Fusion scripts land on the Fusion machine; plan file transfer (shared
 folder, or base64 in the script output for small payloads).
+
+**Windows + WSL** (agent in WSL, Fusion on the Windows host) works well. `127.0.0.1:27182`
+is usually reachable from WSL2 with mirrored networking. If it isn't, use the Windows host
+IP or enable mirrored mode. Files exchange through `C:\Users\Public\`, which WSL sees as
+`/mnt/c/Users/Public/`. Fusion scripts write there and the agent copies from there.
 
 ## Community fallbacks (if the official MCP is unavailable)
 

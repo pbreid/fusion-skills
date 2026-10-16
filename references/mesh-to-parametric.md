@@ -25,20 +25,37 @@ Converted bodies have **no sketches or parameters** - the dimensions are frozen.
 route A is the default when the user says "parametric".
 
 ## 1. Intake (always)
-1. Get the file onto the agent side (path in the workspace) - analysis runs in the agent's
-   Python, not inside Fusion.
-2. Ask/confirm **units** (STL has none; mm is the usual default) and the **target tolerance**
-   (default: 0.1 mm for printed parts, 0.05 mm for machined interfaces). Ask what the part is
-   for and which features are functional (bores, mating faces, hole pattern) - those get exact
-   nominal values; cosmetic ones may be approximated.
-3. Run:
+1. **Get the mesh onto the agent side** - analysis runs in the agent's Python, not in Fusion.
+   - If the user has the original STL file, use it directly.
+   - If the mesh only exists in the open Fusion design, run
+     `scripts/fusion/export_mesh_body_stl.py` (set `MESH_NAME`/`OUT_PATH`). It writes
+     **mm** in world coordinates and prints `extents_mm`. Do not write your own exporter:
+     Fusion's mesh coordinates are **cm** and the PolygonMesh API has traps (see fusion-api.md).
+2. **Scale gate.** `extents_mm` (or the source file's extents) must match the bbox from
+   `inspect_design.py`. Run the analyzer with that cross-check:
    ```
-   python scripts/mesh_analyze.py part.stl --units mm --sections 7 --json part_report.json
+   .venv/bin/python scripts/mesh_analyze.py part.stl --units mm --sections 7 \
+       --expect-extents 156,204,142.5 --json part_report.json
    ```
-   Read: extents/units warning, watertight/bodies, through-hole count (genus), whether it is
+   It exits with `SCALE MISMATCH` on a ×10 / ×25.4 / ×1000 error. Fix the export (or pass
+   `--scale`). Never continue on a mismatched scale: every snapped dimension and the
+   tolerance itself would be wrong.
+3. **STOP and ask the user before planning.** This is a hard stop, especially if the user
+   invited questions. Send one short message covering:
+   - units confirmed (state the measured extents back to them)
+   - target **tolerance** (offer the default: 0.1 mm printed, 0.05 mm machined interfaces)
+   - which features are **functional** (bores, mating faces, hole patterns, fastener sizes)
+     versus cosmetic
+   - intended **process/material**, and whether to keep the current orientation or re-datum
+   - anything odd the analysis found (rotation off-axis, multiple bodies, open mesh, no
+     symmetry where symmetry was expected)
+   Include a screenshot and the headline analysis numbers so the user can answer quickly.
+   Continue only after they reply. If they're unreachable (unattended run), state the
+   defaults you assumed at the top of your report.
+4. Read the report: extents/units warning, watertight/bodies, through-hole count (genus), whether it is
    axis-aligned, dominant planes, cylinders (holes/bosses/fillets with diameters and axes),
    section loops at each level, Z-levels (candidate extrude extents), symmetry.
-4. If not axis-aligned: align it (rotate so principal faces lie on origin planes, translate
+5. If not axis-aligned (check this only *after* the scale gate passes): align it (rotate so principal faces lie on origin planes, translate
    so a datum - e.g. base face and symmetry centre - sits at the origin). Record the
    transform; reconstruct in the aligned frame and compare against the aligned mesh.
 
@@ -94,7 +111,7 @@ Keep the reference mesh visible in screenshots to eyeball alignment (iso + top +
 ## 5. Verify (required before "done")
 1. Export the rebuilt body to STL in mm and world coords:
    `scripts/fusion/export_bodies_stl.py` (set BODY_NAMES). Get the file to the agent side.
-2. `python scripts/mesh_compare.py part.stl rebuild.stl --tol 0.1`
+2. `.venv/bin/python scripts/mesh_compare.py part.stl rebuild.stl --tol 0.1` (compare against the same mm reference the analysis used)
    - p95 deviation within tolerance in **both** directions -> PASS.
    - "missing" regions = original geometry you haven't modelled; "extra" = material you added
      that isn't there. Centroids tell you which feature; fix that feature and re-run.

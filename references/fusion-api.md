@@ -143,12 +143,33 @@ for r in res: r.entityOne, r.entityTwo, r.interferenceBody.volume   # empty = no
 mb = comp.meshBodies.add(path, adsk.fusion.MeshUnits.MillimeterMeshUnit)  # insert STL/OBJ/3MF
 # In a parametric design, mesh insertion may need a BaseFeature edit:
 bf = comp.features.baseFeatures.add(); bf.startEdit(); comp.meshBodies.add(path, units, bf); bf.finishEdit()
-tm = mb.displayMesh   # TriangleMesh: nodeCoordinatesAsDouble (cm), nodeIndices, normalVectorsAsDouble
 # Mesh feature API (preview APIs, may change): features.meshGenerateFaceGroupsFeatures,
 # features.meshConvertFeatures (MeshConvertMethodTypes Faceted / Prismatic / Organic*)
 ```
-Verify `meshBodies.add` signature in the docs for the installed build. Fusion's Python
-has no numpy/trimesh - do heavy mesh maths agent-side.
+**Reading mesh data - verified against live Fusion (Oct 2026):**
+- `meshBody.mesh` is a **`PolygonMesh`**, not a `TriangleMesh`. Its members:
+  `nodeCoordinates` (list of **Point3D**, in **cm**), `nodeCoordinatesAsDouble`/`AsFloat`,
+  `nodeCount`, `triangleNodeIndices`, `triangleCount`, `quadNodeIndices`, `quadCount`,
+  `polygonNodeIndices`, `polygonCount`, `nodeCountPerPolygon`, `normalVectors*`,
+  `triangleFaceGroupTempIds`. There is **no** `.coordinates` and **no** `.nodeIndices`.
+- `TriangleMesh` (from `body.meshManager.createMeshCalculator().calculate()` on a B-rep
+  body) is different: it does have `nodeIndices`.
+- Coordinates are in the owning component's space. For a mesh inside a sub-component,
+  apply the occurrence's `transform2`.
+- `Point3D.transformBy(matrix)` changes the point **in place** and returns a bool, so
+  `[p.transformBy(m) for p in pts]` gives a list of bools. `Matrix3D` has no `asMatrix`,
+  `transformPoint` or `getItem`. Use `getCell(row, col)` / `asArray()` if you need values.
+- `Point3D.create(x, y, z)` takes floats. Passing a Point3D raises an overload TypeError.
+- **Always multiply by 10 when writing mm files.** Use `scripts/fusion/export_mesh_body_stl.py`
+  rather than writing an exporter by hand. It handles all of the above and prints the
+  extents in mm to cross-check.
+
+Verify the `meshBodies.add` signature in the docs for the installed build. Fusion's Python
+has no numpy/trimesh, so do heavy mesh maths agent-side.
+
+**When an attribute error appears**, list the members of the actual object before
+guessing again: `print([a for a in dir(obj) if not a.startswith("_")])`. One probe call
+is cheaper than a string of trial edits.
 
 ## Export
 ```python
@@ -157,8 +178,9 @@ em.execute(em.createSTEPExportOptions(path, comp))
 em.execute(em.createFusionArchiveExportOptions(path))
 o = em.createSTLExportOptions(body, path); o.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh; em.execute(o)
 ```
-STL unit behaviour of `createSTLExportOptions` has varied - for verification use
-`scripts/fusion/export_bodies_stl.py`, which writes mm explicitly.
+STL unit behaviour of `createSTLExportOptions` has varied. For verification use
+`scripts/fusion/export_bodies_stl.py` (B-rep bodies) or `scripts/fusion/export_mesh_body_stl.py`
+(mesh bodies). Both write mm explicitly.
 
 ## Common failure messages
 - *"No target body found to cut or intersect"* -> wrong direction/extent or participant bodies.

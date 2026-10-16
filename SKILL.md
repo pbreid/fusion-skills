@@ -13,21 +13,27 @@ that looks right.
 ## 0. Connect first (every session)
 
 1. Find the Fusion tools. Prefer the **official Autodesk Fusion MCP** (local, Streamable HTTP,
-   default `http://127.0.0.1:27182`, enabled in Fusion *Preferences > General > API*). Its tool
-   list is discovered at connect time - list the tools and read their descriptions; typically
-   there is a *read/query* tool, a *script execution* tool (with a read-only flag), a
-   *screenshot* tool and an *API documentation search* tool.
-2. If it is missing or unreachable, read `references/connection.md` (setup, the community
-   fallback servers, cross-machine use, what to tell the user).
+   `http://127.0.0.1:27182/mcp`, enabled in Fusion *Preferences > General > API*). On current
+   builds the tools are `fusion_mcp_read` (`queryType`: screenshot, apiDocumentation, ...),
+   `fusion_mcp_execute` (`featureType: "script"`, `object: {script, readOnly}`) and
+   `fusion_mcp_update` (undo/redo). Confirm with `tools/list` and read the input schemas;
+   don't guess argument names or enums.
+2. **No native MCP tools in your harness?** Don't hand-roll JSON-RPC. Use
+   `scripts/fusion_mcp.py` (session header, envelope parsing and screenshots are handled):
+   `python3 scripts/fusion_mcp.py run scripts/fusion/inspect_design.py`.
+   Unreachable or missing: read `references/connection.md` (setup, WSL/remote use, fallbacks).
 3. Run `scripts/fusion/inspect_design.py` (read-only) to snapshot: document, saved state,
    units, design type, parameters, components, bodies, meshes, timeline errors.
    Never start editing a document you have not inspected.
+4. Agent-side Python: create a venv once (`python3 -m venv .venv && .venv/bin/pip install
+   trimesh numpy scipy shapely rtree networkx`). System pip is often blocked (PEP 668), and
+   `python` may not exist, so use `python3` or `.venv/bin/python`.
 
 ## 1. Route the request
 
 | User wants | Read | Then |
 |---|---|---|
-| Mesh (STL/OBJ/3MF) -> parametric model | `references/mesh-to-parametric.md` | analyse offline with `scripts/mesh_analyze.py`, rebuild, verify with `scripts/mesh_compare.py` |
+| Mesh (STL/OBJ/3MF) -> parametric model | `references/mesh-to-parametric.md` | export with `export_mesh_body_stl.py` (mm), analyse with `mesh_analyze.py --expect-extents`, **stop and ask intake questions**, rebuild, verify with `mesh_compare.py` |
 | New part from dimensions / sketch / photo / description | `references/part-from-spec.md` | design-intent plan -> parameters -> build |
 | Enclosure, PCB housing, multi-part assembly, joints, 3D-print/CNC fits | `references/enclosures-assemblies.md` | skeleton/master sketch -> components -> joints |
 | Edit an existing design | `references/modeling-principles.md` §Editing | inspect, change the driving parameter or earliest sketch |
@@ -39,10 +45,13 @@ sources these rules came from, for when you need to look something up.
 
 ## 2. Non-negotiables
 
+- **Ask before you plan.** After inspecting and analysing, and before any build plan or
+  geometry, send the user one short message with what you found and the questions that
+  change the model: units, tolerance, functional features, process, orientation. If the
+  user asked "do you have questions?", this step is mandatory. Then wait for the answer.
 - **Plan before geometry.** Write a short build plan first: datum/origin choice, user
   parameters (names, values, units), components, feature order, which features are
-  patterned/mirrored. Show it to the user when the part is non-trivial or ambiguous; ask only
-  for facts you cannot measure or infer (units, critical fits, manufacturing process).
+  patterned/mirrored. Show it to the user when the part is non-trivial or ambiguous.
 - **Parametric, component-first.** Design type parametric. Create (and activate) a component
   before its sketches and bodies. Bodies never sit beside components at the same level.
 - **Parameters drive everything** that a human might change. Name them for intent
@@ -56,8 +65,12 @@ sources these rules came from, for when you need to look something up.
 - **Small steps, verify each.** One logical feature per script call; after each, check the
   returned report (bodies, bbox in mm, timeline health) and take a screenshot at milestones.
   Some servers crash on batched multi-operation calls.
-- **Units:** the API works in **cm and radians** internally. Pass parameter expressions as
-  strings with units (`"6 mm"`, `"plate_w/2"`) via `ValueInput.createByString`; raw floats are cm.
+- **Units:** the API works in **cm and radians** internally, including mesh coordinates.
+  Pass parameter expressions as strings with units (`"6 mm"`, `"plate_w/2"`) via
+  `ValueInput.createByString`; raw floats are cm. Every file you export for analysis must be
+  in mm. Cross-check its extents against the `inspect_design` bbox before using it.
+- **Use the skill's scripts before writing your own.** If an API call fails with an
+  AttributeError, probe `dir(obj)` once rather than guessing repeatedly.
 - **Safety:** save (or confirm the document is disposable) before any write script. Use the
   read-only flag for inspection. Never delete user geometry, break links, or switch to direct
   modelling without asking. If a write times out, inspect before retrying - it may have applied.
@@ -65,7 +78,7 @@ sources these rules came from, for when you need to look something up.
 ## 3. Workflow skeleton
 
 ```
-inspect -> clarify (only what matters) -> plan (params, datums, feature order)
+inspect -> analyse -> ASK (one message, then wait) -> plan (params, datums, feature order)
 -> build in small scripted steps (report after each) -> verify (verification.md)
 -> flex test (change key parameters, confirm no timeline errors, restore)
 -> tidy (names, groups, visibility) -> ask before save/version -> summarise
@@ -77,15 +90,22 @@ anything left for them to decide.
 
 ## 4. Scripts in this skill
 
+- `scripts/fusion_mcp.py` - stdlib client for the official Fusion MCP over HTTP (handshake,
+  session header, envelope parsing, `run`, `screenshot`, `docs`). Use it as a CLI or import it.
 - `scripts/mesh_analyze.py` - offline (agent-side Python) mesh analysis: bbox, units sanity,
   planes, holes/bosses/fillets with axes and diameters, world-aligned cross-sections, symmetry.
+  `--expect-extents X,Y,Z` aborts on a scale mismatch; `--scale` rescales.
 - `scripts/mesh_compare.py` - two-way deviation between source mesh and rebuilt STL, PASS/FAIL
   against a tolerance, and where the worst regions are.
 - `scripts/fusion/inspect_design.py` - read-only JSON snapshot of the active design.
 - `scripts/fusion/build_template.py` - the house pattern for API builds (parameters,
   component-first, constrained sketches, feature pattern, fillets last, report). Copy its helpers.
-- `scripts/fusion/export_bodies_stl.py` - tessellate bodies to a mm STL in world coords for comparison.
+- `scripts/fusion/export_bodies_stl.py` - tessellate B-rep bodies to a mm STL in world coords for comparison.
+- `scripts/fusion/export_mesh_body_stl.py` - write an imported **mesh** body to a mm STL in world
+  coords (handles PolygonMesh, cm→mm, occurrence transform) and print its extents.
 
 Fusion-side scripts expose `run(context)` (official MCP convention). For REPL-style servers,
-uncomment the final `run(None)` line. These templates follow the documented API but adapt
-them if a call errors: use the MCP's documentation-search tool and fix, don't guess.
+uncomment the final `run(None)` line. `inspect_design.py` and `export_mesh_body_stl.py` use API
+members verified against live Fusion. `build_template.py` and `export_bodies_stl.py` follow
+the documentation but are not yet live-tested, so fix any error with the docs tool or a
+`dir()` probe.

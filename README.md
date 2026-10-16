@@ -36,10 +36,12 @@ fusion360/
 └── scripts/
     ├── mesh_analyze.py              Agent-side mesh analysis (planes, holes/bosses, sections, symmetry)
     ├── mesh_compare.py              Two-way deviation between source mesh and rebuild, PASS/FAIL
+    ├── fusion_mcp.py                Stdlib client for the official Fusion MCP (CLI or import)
     └── fusion/                      Scripts executed *inside* Fusion via the MCP
         ├── inspect_design.py        Read-only JSON snapshot of the active design
         ├── build_template.py        Reference build pattern (parameters, constrained sketches, patterns, fillets, report)
-        └── export_bodies_stl.py     Tessellates bodies to a millimetre STL in world coordinates for comparison
+        ├── export_bodies_stl.py     Tessellates solid bodies to a millimetre STL in world coordinates
+        └── export_mesh_body_stl.py  Writes an imported mesh body to a millimetre STL in world coordinates
 ```
 
 ### How the skill is structured
@@ -62,12 +64,15 @@ enters context when it's needed (progressive disclosure). The scripts do determi
 
 **Agent side**
 - An MCP client that supports Streamable HTTP (OMP, Claude Code, Cursor, VS Code, Claude Desktop).
-- Python 3.10+ for the mesh scripts:
+- Python 3.10+ for the mesh scripts. Use a virtual environment: Debian/Ubuntu and WSL block
+  system-wide `pip install` (PEP 668), and `python` may not exist (use `python3`):
   ```bash
-  pip install trimesh numpy scipy shapely rtree networkx
+  cd fusion360
+  python3 -m venv .venv
+  .venv/bin/pip install trimesh numpy scipy shapely rtree networkx
   ```
   Fusion's embedded Python doesn't include numpy or trimesh. That's why mesh analysis runs
-  on the agent side.
+  on the agent side. `fusion_mcp.py` needs only the standard library.
 
 ---
 
@@ -96,7 +101,20 @@ enters context when it's needed (progressive disclosure). The scripts do determi
    or use the community `faust-machines/fusion360-mcp-server`, which can bind to the LAN.
    It has no authentication, so use it on trusted networks only. See `references/connection.md`.
 
-4. **Smoke test.** Ask the agent to "inspect the open Fusion design". It should run
+   **Windows + WSL** (agent in WSL, Fusion on Windows): `127.0.0.1:27182` is normally
+   reachable from WSL2. Exchange files through `C:\Users\Public\`, which is
+   `/mnt/c/Users/Public/` inside WSL.
+
+4. **If your agent can't register MCP servers natively**, it can drive Fusion through the
+   bundled client instead:
+   ```bash
+   python3 scripts/fusion_mcp.py tools --schema
+   python3 scripts/fusion_mcp.py run scripts/fusion/inspect_design.py          # read-only
+   python3 scripts/fusion_mcp.py run my_step.py --write                        # modifies the design
+   python3 scripts/fusion_mcp.py screenshot --direction iso-top-right --out shot.png
+   ```
+
+5. **Smoke test.** Ask the agent to "inspect the open Fusion design". It should run
    `scripts/fusion/inspect_design.py` in read-only mode and report the document, units,
    parameters, components and timeline health.
 
@@ -116,7 +134,7 @@ enclosure and assembly requests. Example prompts:
 What the agent will do (see `SKILL.md` §3):
 
 ```
-inspect → clarify (only what matters) → plan (parameters, datums, feature order)
+inspect → analyse → ask you (then wait) → plan (parameters, datums, feature order)
 → build in small scripted steps → verify → flex test → tidy → ask before saving → summarise
 ```
 
@@ -129,9 +147,14 @@ numbers, assumptions, and open items.
 
 ### `scripts/mesh_analyze.py` (runs on the agent side)
 ```bash
-python scripts/mesh_analyze.py part.stl --units mm --sections 7 --json part_report.json
-# options: --axis auto|x|y|z   --tol 0.05
+.venv/bin/python scripts/mesh_analyze.py part.stl --units mm --sections 7 \
+    --expect-extents 156,204,142.5 --json part_report.json
+# options: --axis auto|x|y|z   --tol 0.05   --scale 10 (cm → mm)
 ```
+`--expect-extents` takes the bbox from `inspect_design.py`. If the file is scaled wrong (for
+example a cm-valued export), the script stops with `SCALE MISMATCH` and suggests the fix,
+instead of producing a report that's 10× off.
+
 It reports:
 - Extents with a units sanity warning, watertightness and body count.
 - A through-hole estimate from the mesh genus.
@@ -144,19 +167,26 @@ It reports:
 
 ### `scripts/mesh_compare.py` (runs on the agent side)
 ```bash
-python scripts/mesh_compare.py original.stl rebuild.stl --tol 0.1 [--align] [--heatmap dev.ply]
+.venv/bin/python scripts/mesh_compare.py original.stl rebuild.stl --tol 0.1 [--align] [--heatmap dev.ply]
 ```
 It reports two-way surface deviation: *missing* geometry (in the original but not the rebuild)
 and *extra* geometry (the reverse), as mean, p95 and max. It also compares extents and volume,
 flags cm/mm mismatches, and lists the centroids of the worst regions so you know which feature
 to fix. The exit code is `0` for PASS and `1` for FAIL.
 
+### `scripts/fusion_mcp.py` (runs on the agent side)
+A standard-library client for the official endpoint. It does the `initialize` handshake,
+keeps the `Mcp-Session-Id` header, parses the `{"message", "success"}` result envelope,
+raises with Fusion's traceback on failure, and decodes screenshots to PNG. Set
+`FUSION_MCP_URL` to override the default `http://127.0.0.1:27182/mcp`.
+
 ### `scripts/fusion/*.py` (runs inside Fusion via the MCP's script tool)
 | Script | Writes to the design? | Purpose |
 |---|---|---|
 | `inspect_design.py` | No | Prints JSON: document state, units, parameters, components, bodies (bbox in mm), sketches and their constraint status, mesh bodies, occurrences, timeline errors and warnings. |
 | `build_template.py` | **Yes** | A worked example: a 60×40×6 plate with a 2×2 hole pattern and filleted corners. It shows the conventions, and its helpers are meant to be copied: idempotent `param()`, `new_component()`, `centered_rectangle()`, `extrude()`, `cut_through_all()`, `fillet()`, `report()`. Run it in a new or scratch design. |
-| `export_bodies_stl.py` | No (it writes a file) | Writes the selected bodies as a binary STL in **mm**, in world coordinates. It can also print the STL as base64 when the agent can't see Fusion's filesystem. |
+| `export_bodies_stl.py` | No (it writes a file) | Writes the selected solid bodies as a binary STL in **mm**, in world coordinates. It can also print the STL as base64 when the agent can't see Fusion's filesystem. |
+| `export_mesh_body_stl.py` | No (it writes a file) | Writes an imported **mesh** body (the STL you want to rebuild) as a binary STL in **mm**, in world coordinates, and prints its extents. Fusion's mesh API returns cm; this script converts. |
 
 All three expose `run(context)`, which is the convention the official MCP uses. For REPL-style
 servers such as faust-machines `execute_code`, uncomment the `run(None)` line at the bottom.
@@ -167,9 +197,21 @@ servers such as faust-machines `execute_code`, uncomment the `run(None)` line at
 
 | Component | Status |
 |---|---|
-| `mesh_analyze.py`, `mesh_compare.py` | Tested on synthetic parts: a prismatic bracket with a boss, bore and hole pattern, an X-axis turned spacer, and a rotated block. All features were recovered at the correct world coordinates, and a deliberate 0.2 mm bore error was detected and localised. |
-| `scripts/fusion/*.py` | Syntax-checked and written against the documented Fusion API, but **not yet run against a live Fusion session**. Expect small fixes on the first run (for example deprecated method names, or hole and extrude direction). The skill tells the agent to use the MCP's documentation-search tool rather than guess. |
-| Official MCP tool names | Fusion's MCP uses dynamic tooling, so tool names are discovered at connect time. The skill describes capabilities (query, script execution with a read-only flag, screenshot, documentation search) rather than hard-coding names. |
+| `mesh_analyze.py`, `mesh_compare.py` | Tested on synthetic parts: a prismatic bracket with a boss, bore and hole pattern, an X-axis turned spacer, and a rotated block. All features were recovered at the correct world coordinates, and a deliberate 0.2 mm bore error was detected and localised. The scale check catches a cm-valued file. |
+| `fusion_mcp.py` | Tested against a mock server that reproduces the live protocol (session header, SSE responses, result envelope, screenshot payload). |
+| `inspect_design.py` | **Run against live Fusion** (first real test, Oct 2026): worked first time. |
+| `export_mesh_body_stl.py` | Written from the PolygonMesh members observed in that live session, which fixes the cm→mm bug found there. Not yet run as a file. |
+| `build_template.py`, `export_bodies_stl.py` | Syntax-checked and written against the documented API, **not yet run live**. Expect small fixes (deprecated names, hole/extrude direction). |
+| Official MCP tools | Verified live: `fusion_mcp_read`, `fusion_mcp_execute`, `fusion_mcp_update` and `fusion_mcp_electronics_read` on server "MCP Server Adapter" 1.0.0. Names may change between Fusion builds, so the skill still tells the agent to check `tools/list`. |
+
+### Changelog
+- **First live test fixes.**
+  - Added the `export_mesh_body_stl.py` mesh exporter and the `fusion_mcp.py` client.
+  - Added `--expect-extents` and `--scale` to `mesh_analyze.py`.
+  - Corrected the PolygonMesh, `transformBy` and Matrix3D notes in `fusion-api.md`.
+  - Documented the real tool schemas, the result envelope and the WSL setup.
+  - Made the intake questions a hard stop before planning.
+  - Added venv setup.
 
 Please open an issue or PR with fixes from live runs.
 

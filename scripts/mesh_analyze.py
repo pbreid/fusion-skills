@@ -4,9 +4,9 @@ mesh_analyze.py - offline analysis of a (clean, CAD-derived) STL/OBJ/3MF to plan
 parametric Fusion rebuild. Runs in the AGENT's Python, not inside Fusion
 (Fusion's embedded Python has no numpy/trimesh).
 
-    pip install trimesh numpy scipy shapely rtree networkx
-    python mesh_analyze.py part.stl [--units mm] [--json out.json] [--sections 5]
-                                     [--axis auto|x|y|z] [--snap 0.05]
+    python3 -m venv .venv && .venv/bin/pip install trimesh numpy scipy shapely rtree networkx
+    .venv/bin/python mesh_analyze.py part.stl [--units mm] [--json out.json] [--sections 5]
+        [--axis auto|x|y|z] [--tol 0.05] [--expect-extents 156,204,142.5] [--scale 10]
 
 Reports:
   * units sanity, bbox, volume, watertightness, genus (through-hole count hint)
@@ -243,10 +243,26 @@ def main():
     ap.add_argument("--sections", type=int, default=5)
     ap.add_argument("--axis", default="auto", help="section/build axis: auto|x|y|z")
     ap.add_argument("--tol", type=float, default=0.05, help="geometric tolerance in mesh units")
+    ap.add_argument("--expect-extents", help="X,Y,Z extents (mm) reported by Fusion (inspect_design "
+                    "bbox) - aborts on a scale mismatch, e.g. a cm-valued STL")
+    ap.add_argument("--scale", type=float, default=1.0, help="multiply coordinates first (10 = cm->mm)")
     a = ap.parse_args()
 
     mesh = trimesh.load(a.mesh, force="mesh")
     mesh.merge_vertices()
+    if a.scale != 1.0:
+        mesh.apply_scale(a.scale)
+    if a.expect_extents:
+        want = np.sort(np.array([float(v) for v in a.expect_extents.split(",")]))
+        got = np.sort(mesh.extents)
+        ratio = float(np.median(want / np.maximum(got, 1e-12)))
+        if abs(ratio - 1) > 0.02:
+            hint = (" -> looks like cm; re-export in mm or pass --scale 10" if abs(ratio - 10) < 0.5 else
+                    " -> looks like m; pass --scale 1000" if abs(ratio - 1000) < 20 else
+                    " -> looks like inches; pass --scale 25.4" if abs(ratio - 25.4) < 0.5 else "")
+            print(f"!! SCALE MISMATCH: mesh extents {np.round(got, 3).tolist()} vs expected "
+                  f"{want.tolist()} (ratio {ratio:.3f}){hint}. Aborting - fix units before analysing.")
+            sys.exit(2)
     rep = {"file": a.mesh, "units": a.units}
     ext = mesh.extents
     rep["triangles"] = int(len(mesh.faces))
@@ -263,7 +279,9 @@ def main():
     mx = float(ext.max())
     rep["units_warning"] = (
         "largest extent < 2 -> file may be in metres or inches; confirm before modelling" if mx < 2 else
-        "largest extent > 3000 -> file may be in microns or scaled; confirm" if mx > 3000 else None)
+        "largest extent > 3000 -> file may be in microns or scaled; confirm" if mx > 3000 else
+        None if a.expect_extents else
+        "scale not cross-checked: pass --expect-extents from inspect_design (Fusion's mesh API is in cm)")
 
     # principal axes
     try:
