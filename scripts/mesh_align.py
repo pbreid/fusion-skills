@@ -39,6 +39,10 @@ def dominant_directions(mesh, ang_tol_deg=3.0):
     for i in np.where(~in_facet)[0]:
         normals.append(mesh.face_normals[i]); areas.append(mesh.area_faces[i])
     normals, areas = np.array(normals), np.array(areas)
+    # ignore individually tiny facets: these are tessellation of curved surfaces (hole walls,
+    # fillets). Hundreds of identical holes would otherwise add up to fake "flat" directions
+    keep = areas >= 1e-4 * mesh.area
+    normals, areas = normals[keep], areas[keep]
     order = np.argsort(-areas)
     cos_t = math.cos(math.radians(ang_tol_deg))
     clusters = []   # [sum_vector, area]
@@ -128,6 +132,16 @@ def main():
     mesh = trimesh.load(a.mesh, force="mesh")
     mesh.merge_vertices()
     R, angle, tilts, method, planar_frac = squaring_rotation(mesh)
+    # describe the correction as one rotation (axis + angle) - easier to read than per-axis tilts
+    if angle > 1e-3:
+        ax_vec = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+        n = np.linalg.norm(ax_vec)
+        ax_vec = ax_vec / n if n > 1e-9 else np.array([0.0, 0.0, 1.0])
+        k = int(np.argmax(np.abs(ax_vec)))
+        ax_name = (("+" if ax_vec[k] > 0 else "-") + "XYZ"[k]) if abs(ax_vec[k]) > 0.99 else \
+            str(np.round(ax_vec, 3).tolist())
+    else:
+        ax_vec, ax_name = np.array([0.0, 0.0, 1.0]), "none"
     R = parse_turns(a.then_rotate) @ R
 
     c0 = mesh.bounds.mean(0)
@@ -148,13 +162,26 @@ def main():
     out.export(a.out)
 
     # residual check: dominant directions of the result should sit on the axes
-    resid = max((math.degrees(math.acos(min(1.0, float(np.max(np.abs(d)))))) for d, f in
-                 dominant_directions(out)[:6] if f >= 0.02), default=0.0)
+    # only judge faces that are MEANT to be square (within 20 deg of an axis); deliberately
+    # angled faces (braces, chamfers, drafts) are listed separately, not counted as error
+    resid, angled = 0.0, []
+    for d, f in dominant_directions(out)[:12]:
+        if f < 0.02:          # same threshold used to pick alignment directions
+            continue
+        dev = math.degrees(math.acos(min(1.0, float(np.max(np.abs(d))))))
+        if dev <= 20:
+            resid = max(resid, dev)
+        else:
+            angled.append({"normal": np.round(d, 3).tolist(), "area_pct": round(100 * f, 2),
+                           "deg_from_nearest_axis": round(dev, 1)})
     rep = {
         "input": a.mesh, "output": a.out, "method": method,
         "planar_area_fraction_top6": round(planar_frac, 3),
         "correction_deg_total": round(angle, 3),
-        "tilt_removed_deg_by_axis": tilts,
+        "rotation_axis": ax_name,
+        "rotation_axis_vector": np.round(ax_vec, 6).tolist(),
+        "axis_tilts_deg": tilts,
+        "angled_faces_ignored": angled,
         "residual_after_deg": round(resid, 4),
         "extents_before": np.round(mesh.extents, 3).tolist(),
         "extents_after": np.round(out.extents, 3).tolist(),
@@ -167,10 +194,13 @@ def main():
     if a.json:
         json.dump(rep, open(a.json, "w"), indent=1)
     print(f"method: {method}")
-    print(f"correction: {rep['correction_deg_total']} deg total; per axis {tilts}")
+    print(f"correction: rotated {rep['correction_deg_total']} deg about {ax_name}")
     print(f"extents before {rep['extents_before']} -> after {rep['extents_after']}")
     print(f"bbox after {rep['bbox_after']}  (origin mode {a.origin})")
-    print(f"residual tilt of dominant faces after alignment: {rep['residual_after_deg']} deg")
+    print(f"residual tilt of square-intended faces after alignment: {rep['residual_after_deg']} deg")
+    if angled:
+        print(f"   ({len(angled)} deliberately angled face groups ignored, e.g. braces/chamfers: "
+              f"{', '.join(str(a_['deg_from_nearest_axis']) + ' deg' for a_ in angled[:4])})")
     if rep["residual_after_deg"] > 0.5:
         print("!! dominant faces still not square - inspect views; part may be genuinely angled "
               "(e.g. drafted or deliberately skewed features). Ask the user.")

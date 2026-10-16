@@ -121,6 +121,14 @@ report: count, pitch per axis, `regular`, `fills_grid`, and `stations_along_axis
   re-flows the grid. Fusion expressions support `floor`, `ceil` and `round`.
 - Use **Spacing** distance type when the pitch is the design value. Use **Extent** when the
   overall span is the design value and the pitch is derived.
+- **Recover which one the designer used from the numbers.** Designers type round numbers. An
+  odd pitch whose span is round (7.421 = 141/19, 6.667 = 40/6) means "n instances over a span",
+  so use Extent with `vent_rows = 20`, `vent_span = 141`. A round pitch (7.5) means Spacing.
+  `mesh_analyze.py` reports this as `design_hint.suggest` per axis. Never parameterise a derived
+  pitch like 7.421 as the driving value.
+- **Blocks of a grid** (identical groups separated by a larger gap): pattern the seed into one
+  block, then pattern that pattern feature by the block pitch (`vent_block_pitch`,
+  `vent_blocks`). Suppressing instances is the fallback for irregular gaps.
 
 **Performance with large counts.**
 - Hundreds of instances: set compute option **Identical** when every instance meets the same

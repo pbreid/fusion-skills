@@ -87,7 +87,10 @@ route A is the default when the user says "parametric".
    - `cylinder_groups`. Holes are already grouped into patterns (count, Ø, axis, the walls
      they sit on, grid pitch, regular or not, `fills_grid`). Each regular group becomes **one
      seed + one pattern** (plus a mirror for the opposite wall), never individual holes.
-     Choose the pattern type with the table in modeling-principles.md §5a. The build plan
+     Each axis has a `design_hint`: `suggest` says whether the designer used a pitch
+     (Spacing) or a count over a span (Extent), and identifies repeated blocks. Use it to choose
+     the driving parameters and the pattern type (modeling-principles.md §5a), and state it in
+     the plan instead of asking the user about pitch rounding. The build plan
      must list each pattern with its parameters (Ø, pitch, counts, seed position, suppressed
      instances).
    - For more detail at specific heights, re-run with `--section-at z=60,z=65,x=-68`

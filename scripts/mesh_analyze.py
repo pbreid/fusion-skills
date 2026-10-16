@@ -35,7 +35,8 @@ All lengths are reported in the mesh's units (default mm). Fusion API uses cm.
                    watertight, volume, bbox_min, bbox_max}}
   cylinder_groups[]: {kind (hole|boss|fillet), diameter, axis, count, lengths[],
                    stations_along_axis[], <X|Y|Z>_values: {n, min, max, pitch, regular,
-                   gaps[[after_value, n_missing]], values[]}, centres[[x,y,z]],
+                   gaps[[after_value, n_missing]], values[],
+                   design_hint: {blocks[{start,n,span}], block_pitch[], suggest}}, centres[[x,y,z]],
                    grid_cells_per_station, fills_grid}    <- use this for hole patterns
                (regular=true with gaps = a pitch grid with missing rows/columns, e.g. two blocks)
   sections_at[]: same shape as sections[] plus axis, from --section-at
@@ -205,6 +206,37 @@ def _pitch(vals):
     return u.tolist(), round(pitch, 3), on_grid, gaps
 
 
+def _design_hint(vals, pitch, gaps):
+    """Designers usually specify round numbers. If the pitch is odd but the span of each block
+    is round, the pattern was defined as 'n instances over a span' (Fusion Extent type)."""
+    if pitch is None or len(vals) < 3:
+        return None
+    # split into blocks at gaps
+    blocks, start = [], 0
+    for i in range(1, len(vals)):
+        if vals[i] - vals[i - 1] > 1.5 * pitch:
+            blocks.append(vals[start:i]); start = i
+    blocks.append(vals[start:])
+    info = [{"start": round(b[0], 3), "n": len(b), "span": round(b[-1] - b[0], 3)} for b in blocks]
+    def roundish(x, step=0.5, tol=0.03):
+        return abs(x - round(x / step) * step) < tol
+    hint = {"blocks": info}
+    pitch_round = roundish(pitch, 0.1, 0.008)          # CAD-derived meshes are precise
+    if not pitch_round and all(roundish(b["span"]) for b in info if b["n"] > 1):
+        hint["suggest"] = ("extent: " + " + ".join(f"{b['n']} over {round(b['span'] * 2) / 2:g}" for b in info)
+                           + " (pitch is a derived value - use Extent distance type)")
+    elif pitch_round:
+        hint["suggest"] = f"spacing: pitch {round(pitch * 10) / 10:g}"
+    if len(info) > 1:
+        bp = [round(info[i + 1]["start"] - info[i]["start"], 3) for i in range(len(info) - 1)]
+        hint["block_pitch"] = bp
+        if len(set(b["n"] for b in info)) == 1 and max(bp) - min(bp) < 0.1:
+            extra = (f"{len(info)} identical blocks at {bp[0]:g} -> pattern the block pattern "
+                     f"(pattern of a pattern)")
+            hint["suggest"] = f"{hint['suggest']}; {extra}" if hint.get("suggest") else extra
+    return hint
+
+
 def cylinder_groups(cyls):
     """Group cylinders by kind, diameter and axis; report count and grid pitch.
     Turns hundreds of hole records into 'Ø5 hole x280, X axis, grid 20x14 @ 7.4 x 6.7'."""
@@ -228,7 +260,8 @@ def cylinder_groups(cyls):
                 vals, pitch, regular, gaps = _pitch(P[:, k])
                 g["%s_values" % "XYZ"[k]] = {"n": len(vals), "min": vals[0], "max": vals[-1],
                                             "pitch": pitch, "regular": regular,
-                                            "gaps": gaps, "values": vals[:200]}
+                                            "gaps": gaps, "values": vals[:200],
+                                            "design_hint": _design_hint(vals, pitch, gaps)}
             g["centres"] = np.round(P, 2).tolist()[:1000]   # base points (min end along axis)
             n_grid = np.prod([g["%s_values" % "XYZ"[k]]["n"] for k in (0, 1, 2) if k != ai])
             g["grid_cells_per_station"] = int(n_grid)
@@ -474,6 +507,9 @@ def main():
                     for k, v in g.items() if k.endswith("_values")]
             grid = f" stations {g['stations_along_axis'][:4]} grid {' '.join(dims)}"
         print(f"  {g['kind']:<7} Ø{g['diameter']:<6} {str(g['axis']):<4} x{g['count']:<4} len {g['lengths'][:3]}{grid}")
+        for k, v in g.items():
+            if k.endswith("_values") and v.get("design_hint") and v["design_hint"].get("suggest") and g["count"] >= 4:
+                print(f"      {k[0]} intent: {v['design_hint']['suggest']}")
     print(f"\n## cylindrical regions (first 25 of {len(rep['cylinders'])}; full list in --json)")
     for c in rep["cylinders"][:25]:
         print(f"  {c['kind']:<22} Ø{c['diameter']:<8} axis {c['axis_aligned'] or c['axis']} "
