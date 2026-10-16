@@ -1,0 +1,212 @@
+# fusion360 — an agent skill for parametric CAD in Autodesk Fusion
+
+A skill for AI coding agents (OMP, Claude Code, Cursor, Codex and other agents that load
+`SKILL.md`-style skills) that lets them drive **Autodesk Fusion (Fusion 360)** over the Model
+Context Protocol and produce clean, editable, parametric CAD.
+
+The skill pairs a connection guide with distilled CAD and Fusion best practice, so the agent
+models like a careful mechanical engineer. It builds named components, user parameters and
+fully constrained sketches in a short, readable timeline, and it verifies its own work.
+
+It covers three workflows:
+
+| Workflow | What the agent does |
+|---|---|
+| **Mesh → parametric** | It analyses an STL/OBJ/3MF offline, recovers design intent (nominal sizes, patterns, symmetry), rebuilds the part feature by feature, then measures the deviation against the source mesh. |
+| **New part from a spec** | It turns dimensions, datasheets, sketches or descriptions into a build plan, then into a parametric part. |
+| **Enclosures and assemblies** | It builds skeleton-driven enclosures around a PCB. It applies DFM rules for printing and moulding, sets fits as parameters, and assembles parts with joints, rigid groups and interference checks. |
+
+---
+
+## Repository layout
+
+```
+fusion360/
+├── SKILL.md                         Entry point: connection steps, routing table, non-negotiable rules
+├── README.md                        This file
+├── references/
+│   ├── connection.md                Official vs community Fusion MCP servers, setup, remote/LAN use, licence caveats
+│   ├── modeling-principles.md       Core rulebook: design intent, Rule #1, sketches, reference stability, feature order
+│   ├── fusion-api.md                Fusion Python API patterns, units, selection, timeline, measurement, export, errors
+│   ├── mesh-to-parametric.md        Mesh rebuild workflow (and when to use Convert Mesh instead)
+│   ├── part-from-spec.md            Requirements → plan → build → verify for new parts
+│   ├── enclosures-assemblies.md     Top-down enclosures, DFM rules, fit table, joints/constraints/grounding
+│   ├── verification.md              Checklist the agent must pass before saying "done"
+│   └── resources.md                 Sources the rules were distilled from, plus learning channels
+└── scripts/
+    ├── mesh_analyze.py              Agent-side mesh analysis (planes, holes/bosses, sections, symmetry)
+    ├── mesh_compare.py              Two-way deviation between source mesh and rebuild, PASS/FAIL
+    └── fusion/                      Scripts executed *inside* Fusion via the MCP
+        ├── inspect_design.py        Read-only JSON snapshot of the active design
+        ├── build_template.py        Reference build pattern (parameters, constrained sketches, patterns, fillets, report)
+        └── export_bodies_stl.py     Tessellates bodies to a millimetre STL in world coordinates for comparison
+```
+
+### How the skill is structured
+
+`SKILL.md` stays short and is always loaded when the skill triggers. It tells the agent how to
+connect, then routes it to the reference file for the task at hand, so detailed material only
+enters context when it's needed (progressive disclosure). The scripts do deterministic work
+(geometry analysis, measurement, export) that the model should not attempt "by eye".
+
+---
+
+## Requirements
+
+**Fusion side**
+- Autodesk Fusion desktop (Windows or macOS), running, with the Design workspace active.
+- The **Autodesk Fusion MCP Server** enabled: *Preferences → General → API → Fusion MCP Server*.
+  Note the port; the default is `27182`.
+- Licence note: Fusion for Personal Use limits you to 10 active editable documents and does
+  not include *Prismatic* Convert Mesh. The default rebuild workflow doesn't need it.
+
+**Agent side**
+- An MCP client that supports Streamable HTTP (OMP, Claude Code, Cursor, VS Code, Claude Desktop).
+- Python 3.10+ for the mesh scripts:
+  ```bash
+  pip install trimesh numpy scipy shapely rtree networkx
+  ```
+  Fusion's embedded Python doesn't include numpy or trimesh. That's why mesh analysis runs
+  on the agent side.
+
+---
+
+## Installation
+
+1. **Add the skill to your agent.** Copy or clone the `fusion360/` folder into the agent's
+   skills directory:
+   - Claude Code: `~/.claude/skills/fusion360/` (user-wide) or `.claude/skills/fusion360/` (per project)
+   - OMP and other agents: the skills folder that agent reads `SKILL.md` files from
+
+2. **Connect the agent to Fusion.** Add the MCP server to your client config:
+   ```json
+   { "mcpServers": { "fusion": { "url": "http://127.0.0.1:27182/mcp" } } }
+   ```
+   Some clients expect the bare `http://127.0.0.1:27182` instead. For Claude Code:
+   ```bash
+   claude mcp add --transport http fusion http://127.0.0.1:27182/mcp
+   ```
+   Start Fusion **before** the client connects.
+
+3. **If the agent isn't on the Fusion machine.** The official server only listens on
+   localhost. Either forward the port:
+   ```bash
+   ssh -L 27182:127.0.0.1:27182 user@fusion-pc
+   ```
+   or use the community `faust-machines/fusion360-mcp-server`, which can bind to the LAN.
+   It has no authentication, so use it on trusted networks only. See `references/connection.md`.
+
+4. **Smoke test.** Ask the agent to "inspect the open Fusion design". It should run
+   `scripts/fusion/inspect_design.py` in read-only mode and report the document, units,
+   parameters, components and timeline health.
+
+---
+
+## Usage
+
+Invoke the skill by name or just describe the job; the skill triggers on Fusion, STL→CAD,
+enclosure and assembly requests. Example prompts:
+
+- *"Use the fusion360 skill to turn `bracket.stl` into a parametric model. It's in mm, and the
+  holes are M3 clearance. Target 0.1 mm deviation."*
+- *"Design an FDM enclosure for this PCB (STEP attached) with heat-set inserts, a USB-C
+  cut-out on the short side and a lid with a 0.2 mm lip clearance."*
+- *"Make the wall thickness and PCB clearance parameters in the open design and flex-test them."*
+
+What the agent will do (see `SKILL.md` §3):
+
+```
+inspect → clarify (only what matters) → plan (parameters, datums, feature order)
+→ build in small scripted steps → verify → flex test → tidy → ask before saving → summarise
+```
+
+The final summary lists the parameters created, the bodies and components, the verification
+numbers, assumptions, and open items.
+
+---
+
+## Scripts
+
+### `scripts/mesh_analyze.py` (runs on the agent side)
+```bash
+python scripts/mesh_analyze.py part.stl --units mm --sections 7 --json part_report.json
+# options: --axis auto|x|y|z   --tol 0.05
+```
+It reports:
+- Extents with a units sanity warning, watertightness and body count.
+- A through-hole estimate from the mesh genus.
+- Whether the part is aligned to world axes.
+- Dominant planes as world positions (`Z=6.0`).
+- Cylindrical regions classified as hole, boss or fillet, with diameter, axis, base point and length.
+- Cross-section loops at several levels in world coordinates of the matching origin plane, with
+  circles and rectangles detected.
+- Candidate extrude levels and mirror symmetry.
+
+### `scripts/mesh_compare.py` (runs on the agent side)
+```bash
+python scripts/mesh_compare.py original.stl rebuild.stl --tol 0.1 [--align] [--heatmap dev.ply]
+```
+It reports two-way surface deviation: *missing* geometry (in the original but not the rebuild)
+and *extra* geometry (the reverse), as mean, p95 and max. It also compares extents and volume,
+flags cm/mm mismatches, and lists the centroids of the worst regions so you know which feature
+to fix. The exit code is `0` for PASS and `1` for FAIL.
+
+### `scripts/fusion/*.py` (runs inside Fusion via the MCP's script tool)
+| Script | Writes to the design? | Purpose |
+|---|---|---|
+| `inspect_design.py` | No | Prints JSON: document state, units, parameters, components, bodies (bbox in mm), sketches and their constraint status, mesh bodies, occurrences, timeline errors and warnings. |
+| `build_template.py` | **Yes** | A worked example: a 60×40×6 plate with a 2×2 hole pattern and filleted corners. It shows the conventions, and its helpers are meant to be copied: idempotent `param()`, `new_component()`, `centered_rectangle()`, `extrude()`, `cut_through_all()`, `fillet()`, `report()`. Run it in a new or scratch design. |
+| `export_bodies_stl.py` | No (it writes a file) | Writes the selected bodies as a binary STL in **mm**, in world coordinates. It can also print the STL as base64 when the agent can't see Fusion's filesystem. |
+
+All three expose `run(context)`, which is the convention the official MCP uses. For REPL-style
+servers such as faust-machines `execute_code`, uncomment the `run(None)` line at the bottom.
+
+---
+
+## Testing status
+
+| Component | Status |
+|---|---|
+| `mesh_analyze.py`, `mesh_compare.py` | Tested on synthetic parts: a prismatic bracket with a boss, bore and hole pattern, an X-axis turned spacer, and a rotated block. All features were recovered at the correct world coordinates, and a deliberate 0.2 mm bore error was detected and localised. |
+| `scripts/fusion/*.py` | Syntax-checked and written against the documented Fusion API, but **not yet run against a live Fusion session**. Expect small fixes on the first run (for example deprecated method names, or hole and extrude direction). The skill tells the agent to use the MCP's documentation-search tool rather than guess. |
+| Official MCP tool names | Fusion's MCP uses dynamic tooling, so tool names are discovered at connect time. The skill describes capabilities (query, script execution with a read-only flag, screenshot, documentation search) rather than hard-coding names. |
+
+Please open an issue or PR with fixes from live runs.
+
+---
+
+## Key rules the skill enforces (summary)
+
+- **Parametric and component-first** ("Rule #1"): create and activate a component before its
+  sketches and bodies. Bodies never sit beside components.
+- **User parameters drive everything** a human might change, with intent-revealing names and
+  explicit units.
+- **Sketches** go on origin or origin-derived planes, anchored to the origin. Constraints come
+  before dimensions, every sketch is fully constrained, and each sketch has one purpose.
+  Projections are avoided.
+- **Feature order:** base feature → adds and cuts → holes → feature patterns and mirrors →
+  shell and draft → **fillets and chamfers last**.
+- **Stable references:** origin > construction from origin > sketch > body > face > edge > vertex.
+  Timeline warnings count as bugs.
+- **API units are cm and radians.** Parameter expressions are passed as strings (`"6 mm"`, `"plate_w/2"`).
+- **Safety:** inspect first and save first. Run one operation per call and verify after each.
+  Never delete user geometry or switch to direct modelling without asking. If a write times
+  out, inspect before retrying.
+
+The full reasoning and sources are in `references/`.
+
+---
+
+## Sources
+
+The guidance is distilled from Autodesk's official Fusion MCP documentation and blog posts
+(2026), the Fusion API reference, the AU class *"Fusion 360 – Modeling Tips from the Experts"*
+(Peter Doering and Jeff Strater), AU assembly classes, Onshape's *Mastering 3D Modeling*, DFM
+guidance for plastic enclosures, and FDM tolerance guides. Full list in
+[`references/resources.md`](references/resources.md).
+
+## Disclaimer
+
+This is not an Autodesk product. Autodesk, Fusion and Fusion 360 are trademarks of
+Autodesk, Inc. Generated geometry, fits and DFM values are starting points. Verify critical
+dimensions, and test-print or prototype before relying on a part.
